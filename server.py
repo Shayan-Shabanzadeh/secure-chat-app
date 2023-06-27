@@ -3,7 +3,56 @@ import threading
 from collections import defaultdict
 
 import bcrypt
-from Crypto.Cipher import AES
+from Cryptodome.Cipher import AES
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.backends import default_backend
+import re
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+header_size = 500
+# Load the private key from the file
+with open("server_private_key.pem", "rb") as file:
+    server_private_key_bytes = file.read()
+
+# Deserialize the private key from bytes
+server_private_key = serialization.load_pem_private_key(
+    server_private_key_bytes,
+    password=None,  # Add password if the private key is encrypted
+    backend=default_backend()
+)
+
+# Load the public key from the file
+with open("server_public_key.pem", "rb") as file:
+    server_public_key_bytes = file.read()
+
+# Deserialize the public key from bytes
+server_public_key = serialization.load_pem_public_key(
+    server_public_key_bytes,
+    backend=default_backend()
+)
+
+
+
+def decrypt_first_message(ciphertext, private_key):
+    # Decrypt the ciphertext with the private key
+    decrypted_data = private_key.decrypt(
+        ciphertext,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+    decrypted_data = decrypted_data.decode()
+    decrypted_parts = decrypted_data.split("||")
+    nonce = decrypted_parts[0]
+    message = decrypted_parts[1]
+
+    
+
+    return nonce, message
+
+
 
 # AES encryption key (must be 16, 24, or 32 bytes long)
 KEY = b'mysecretpassword'
@@ -46,112 +95,140 @@ def decrypt(data):
 # function to handle client connections
 def handle_client(client_socket, client_address):
     # send welcome message
-    client_socket.send(encrypt("Welcome to the chat app!"))
+    client_socket.send(("Welcome to the chat app!").encode())
 
     while True:
         # receive data from the client
         try:
-            data = decrypt(client_socket.recv(1024))
+            data = client_socket.recv(1024)
+            data_header = data[:header_size].decode()
+            data_main = data[header_size:]
         except ValueError:
-            client_socket.send(encrypt("Error: Key incorrect or message corrupted"))
+            client_socket.send(("Error: Key incorrect or message corrupted").encode())
             continue
 
         # handle login
-        if data.startswith("LOGIN"):
+        if data_header.startswith("LOGIN"):
             _, username, password = data.split()
             if username not in users:
-                client_socket.send(encrypt("Error: Invalid username or password"))
+                client_socket.send("Error: Invalid username or password")
             elif not bcrypt.checkpw(password.encode(), users[username]):
-                client_socket.send(encrypt("Error: Invalid username or password"))
+                client_socket.send("Error: Invalid username or password")
             else:
                 clients[username] = client_socket
-                client_socket.send(encrypt("Login successful"))
+                client_socket.send("Login successful")
 
         # handle signup
-        elif data.startswith("SIGNUP"):
-            _, username, password = data.split()
+        elif data_header.startswith("SIGNUP"):
+            
+            data_header_parts = data_header.split("||")
+            serialized_public_key = data_header_parts[1].encode()
+            # Deserialize the public key from bytes
+            public_key = serialization.load_pem_public_key(
+            serialized_public_key,
+            backend=default_backend()
+            )
+            nonce, message = decrypt_first_message(data_main,server_private_key)
+            _, username, password = message.split()
             if username in users:
-                client_socket.send(encrypt("Error: Username already exists"))
+                msg = "Error: Username already exists"
             else:
+                msg = "successfully signed up"
                 salt = bcrypt.gensalt()
                 users[username] = bcrypt.hashpw(password.encode(), salt)
-                client_socket.send(encrypt("Signup successful"))
+
+            response_message = nonce +"||"+ msg
+            response_message = response_message.encode()
+            # Encrypt the response message with the received public key
+            encrypted_response = public_key.encrypt(
+            response_message,
+            padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+            )
+            )
+            header = b"SIGNUP||"
+        # Pad the header with null bytes ('\x00') to reach the desired size
+            padded_header = header.ljust(header_size, b'\x00')
+            response_message = padded_header + encrypted_response
+            client_socket.send(response_message)    
 
         # handle group chat
-        elif data.startswith("GROUP"):
+        elif data_header.startswith("GROUP"):
             _, groupname, message = data.split(maxsplit=2)
             if groupname not in groups:
-                client_socket.send(encrypt("Error: Invalid group name"))
+                client_socket.send("Error: Invalid group name")
             else:
                 for member in groups[groupname]:
                     if member != username:
                         recipient_socket = clients[member]
-                        recipient_socket.send(encrypt(f"{username}: {message}"))
+                        recipient_socket.send(f"{username}: {message}")
 
         # handle private chat
-        elif data.startswith("PRIVATE"):
+        elif data_header.startswith("PRIVATE"):
             _, recipient, message = data.split(maxsplit=2)
             if recipient not in clients:
-                client_socket.send(encrypt("Error: Invalid recipient"))
+                client_socket.send("Error: Invalid recipient")
             else:
                 recipient_socket = clients[recipient]
                 sender = list(clients.keys())[list(clients.values()).index(client_socket)]
-                recipient_socket.send(encrypt(f"{sender} (private): {message}"))
+                recipient_socket.send(f"{sender} (private): {message}")
 
         # handle create group
-        elif data.startswith("CREATE_GROUP"):
+        elif data_header.startswith("CREATE_GROUP"):
             _, groupname, *members = data.split()
             if groupname in groups:
-                client_socket.send(encrypt("Error: Group name already exists"))
+                client_socket.send("Error: Group name already exists")
             else:
                 groups[groupname] = set(members)
                 for member in members:
                     if member in clients:
                         recipient_socket = clients[member]
-                        recipient_socket.send(encrypt(f"Group {groupname} created"))
+                        recipient_socket.send(f"Group {groupname} created")
 
         # handle join group
-        elif data.startswith("JOIN_GROUP"):
+        elif data_header.startswith("JOIN_GROUP"):
             _, groupname = data.split()
             if groupname not in groups:
-                client_socket.send(encrypt("Error: Invalid group name"))
+                client_socket.send("Error: Invalid group name")
             else:
                 groups[groupname].add(username)
                 for member in groups[groupname]:
                     if member != username and member in clients:
                         recipient_socket = clients[member]
-                        recipient_socket.send(encrypt(f"{username} joined group {groupname}"))
+                        recipient_socket.send(f"{username} joined group {groupname}")
 
         # handle leave group
-        elif data.startswith("LEAVE_GROUP"):
+        elif data_header.startswith("LEAVE_GROUP"):
             _, groupname = data.split()
             if groupname not in groups:
-                client_socket.send(encrypt("Error: Invalid group name"))
+                client_socket.send("Error: Invalid group name")
             elif username not in groups[groupname]:
-                client_socket.send(encrypt("Error: You are not a member of this group"))
+                client_socket.send("Error: You are not a member of this group")
             else:
                 groups[groupname].remove(username)
                 for member in groups[groupname]:
                     if member != username and member in clients:
                         recipient_socket = clients[member]
-                        recipient_socket.send(encrypt(f"{username}left group {groupname}"))
+                        recipient_socket.send(f"{username}left group {groupname}")
 
         # handle list groups
-        elif data.startswith("LIST_GROUPS"):
+        elif data_header.startswith("LIST_GROUPS"):
             group_list = ", ".join(groups.keys())
-            client_socket.send(encrypt(f"Available groups: {group_list}"))
+            client_socket.send(f"Available groups: {group_list}")
 
         # handle list members
-        elif data.startswith("LIST_MEMBERS"):
+        elif data_header.startswith("LIST_MEMBERS"):
             _, groupname = data.split()
             if groupname not in groups:
-                client_socket.send(encrypt("Error: Invalid group name"))
+                client_socket.send("Error: Invalid group name")
             else:
                 member_list = ", ".join(groups[groupname])
-                client_socket.send(encrypt(f"Members of group {groupname}: {member_list}"))
+                client_socket.send(f"Members of group {groupname}: {member_list}")
 
         # handle quit
-        elif data.startswith("QUIT"):
+        elif data_header.startswith("QUIT"):
             client_socket.close()
             # if username in clients:
             #     del clients[username]
@@ -159,7 +236,7 @@ def handle_client(client_socket, client_address):
 
         # handle invalid command
         else:
-            client_socket.send(encrypt("Error: Invalid command"))
+            client_socket.send("Error: Invalid command")
 
     print(f"Client disconnected: {client_address}")
 
