@@ -4,11 +4,10 @@ from collections import defaultdict
 
 import bcrypt
 from Cryptodome.Cipher import AES
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
-import re
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+
 header_size = 500
 # Load the private key from the file
 with open("server_private_key.pem", "rb") as file:
@@ -32,7 +31,6 @@ server_public_key = serialization.load_pem_public_key(
 )
 
 
-
 def decrypt_first_message(ciphertext, private_key):
     # Decrypt the ciphertext with the private key
     decrypted_data = private_key.decrypt(
@@ -48,10 +46,7 @@ def decrypt_first_message(ciphertext, private_key):
     nonce = decrypted_parts[0]
     message = decrypted_parts[1]
 
-    
-
     return nonce, message
-
 
 
 # AES encryption key (must be 16, 24, or 32 bytes long)
@@ -95,7 +90,7 @@ def decrypt(data):
 # function to handle client connections
 def handle_client(client_socket, client_address):
     # send welcome message
-    client_socket.send(("Welcome to the chat app!").encode())
+    client_socket.send("Welcome to the chat app!".encode())
 
     while True:
         # receive data from the client
@@ -104,7 +99,7 @@ def handle_client(client_socket, client_address):
             data_header = data[:header_size].decode()
             data_main = data[header_size:]
         except ValueError:
-            client_socket.send(("Error: Key incorrect or message corrupted").encode())
+            client_socket.send("Error: Key incorrect or message corrupted".encode())
             continue
 
         # handle login
@@ -120,15 +115,15 @@ def handle_client(client_socket, client_address):
 
         # handle signup
         elif data_header.startswith("SIGNUP"):
-            
+
             data_header_parts = data_header.split("||")
             serialized_public_key = data_header_parts[1].encode()
             # Deserialize the public key from bytes
             public_key = serialization.load_pem_public_key(
-            serialized_public_key,
-            backend=default_backend()
+                serialized_public_key,
+                backend=default_backend()
             )
-            nonce, message = decrypt_first_message(data_main,server_private_key)
+            nonce, message = decrypt_first_message(data_main, server_private_key)
             _, username, password = message.split()
             if username in users:
                 msg = "Error: Username already exists"
@@ -137,24 +132,24 @@ def handle_client(client_socket, client_address):
                 salt = bcrypt.gensalt()
                 users[username] = bcrypt.hashpw(password.encode(), salt)
 
-            response_message = nonce +"||"+ msg
+            response_message = nonce + "||" + msg
             response_message = response_message.encode()
             # Encrypt the response message with the received public key
             encrypted_response = public_key.encrypt(
-            response_message,
-            padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-            )
+                response_message,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+                )
             )
             header = b"SIGNUP||"
-        # Pad the header with null bytes ('\x00') to reach the desired size
+            # Pad the header with null bytes ('\x00') to reach the desired size
             padded_header = header.ljust(header_size, b'\x00')
             response_message = padded_header + encrypted_response
-            client_socket.send(response_message)    
+            client_socket.send(response_message)
 
-        # handle group chat
+            # handle group chat
         elif data_header.startswith("GROUP"):
             _, groupname, message = data.split(maxsplit=2)
             if groupname not in groups:

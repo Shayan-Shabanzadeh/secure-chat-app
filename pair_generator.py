@@ -1,6 +1,7 @@
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+
 
 def generate_default_key_pair():
     private_key = rsa.generate_private_key(
@@ -11,6 +12,7 @@ def generate_default_key_pair():
     public_key = private_key.public_key()
 
     return private_key, public_key
+
 
 # Generate the default key pair
 server_private_key, server_public_key = generate_default_key_pair()
