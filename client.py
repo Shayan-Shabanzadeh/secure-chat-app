@@ -2,12 +2,13 @@ import os
 import random
 import socket
 import threading
-
+import client_repository
 from Cryptodome.Cipher import AES
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
 
 signup_pattern = r"SIGNUP (\S+) (\S+)"
 nonce = ""
@@ -236,6 +237,7 @@ def connect_to_server():
 
 if __name__ == "__main__":
     try:
+        client_repository.initialize_database()
         connect_to_server()
     except ConnectionRefusedError:
         print("Server not available")

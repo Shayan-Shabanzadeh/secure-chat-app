@@ -1,4 +1,5 @@
 import os
+import secrets
 import time
 
 import cryptography
@@ -84,3 +85,25 @@ def decode_with_private_key(private_key, ciphertext):
     extracted_timestamp = int.from_bytes(plaintext[16:26], 'big')
     extracted_message = plaintext[26:].decode('utf-8')
     return extracted_nonce, extracted_timestamp, extracted_message
+
+
+def generate_session_key(expiration_time=3600):
+    # Generate a random session key using secrets module
+    session_key = secrets.token_hex(16)
+
+    # Calculate the expiration timestamp
+    expiration_timestamp = time.time() + expiration_time
+
+    # Return the session key and expiration timestamp as a tuple
+    return session_key, expiration_timestamp
+
+
+def extract_expire_time(session_key):
+    # Extract the expiration timestamp from the session key
+    expiration_timestamp = int(session_key[-10:], 16)
+
+    # Convert the expiration timestamp to a datetime object
+    expiration_datetime = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(expiration_timestamp))
+
+    # Return the expiration datetime
+    return expiration_datetime
