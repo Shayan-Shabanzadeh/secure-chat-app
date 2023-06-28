@@ -72,13 +72,31 @@ def find_user_by_username(username):
         session.close()
 
 
+def set_master_key(username, master_key):
+    session = Session()
+    try:
+        user = session.query(User).filter_by(username=username).first()
+        if user:
+            user.master_key = master_key
+            session.commit()
+            print("Master key set successfully!")
+        else:
+            print("User not found.")
+    except SQLAlchemyError as e:
+        session.rollback()
+        print("Error occurred while setting master key.")
+        print("Error:", str(e))
+    finally:
+        session.close()
+
+
 # Define the User entity
 class User(Base):
     __tablename__ = 'users'
 
     id = Column(Integer, primary_key=True)
     username = Column(String, unique=True, nullable=False)
-    password = Column(String, nullable=False)
+    password = Column(String, unique=True, nullable=False)
     public_key = Column(String, nullable=False)
     is_online = Column(Boolean, nullable=False)
     master_key = Column(String)
