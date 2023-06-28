@@ -4,33 +4,37 @@ import time
 
 import cryptography
 from cryptography.hazmat.primitives import serialization, asymmetric, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.fernet import Fernet
+header_size = 500
+time_stamps_threshold = 5
+def encode_with_public_key(public_key, message, header):
+    public_key = serialization.load_pem_public_key(public_key)
 
-
-def encode_with_public_key(public_key, message):
-    public_key = serialization.load_pem_public_key(public_key.encode('utf-8'))
-
-    # Generate nonce and timestamp
-    nonce = os.urandom(16)
     timestamp = int(time.time())
-
-    # Convert timestamp to bytes
-    timestamp_bytes = timestamp.to_bytes(10, 'big')
-
-    # Concatenate nonce, timestamp, and message
-    plaintext = nonce + timestamp_bytes + message.encode('utf-8')
-
-    # Encrypt the plaintext using the public key
-    ciphertext = public_key.encrypt(
-        plaintext,
-        asymmetric.padding.OAEP(
-            mgf=asymmetric.padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
+    # Append client public key, nonce, and message
+    data = str(timestamp) + "||" + message
+    data = data.encode()
+    # Encrypt the data with server's public key
+    try:
+        ciphertext = public_key.encrypt(
+            data,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
         )
-    )
-
-    return ciphertext, nonce, timestamp
+        # Encryption successful
+        print("Encryption successful.")
+    except Exception as e:
+        # Encryption failed
+        print("Encryption failed:", str(e))
+    header_bytes = bytes(header, 'utf-8')
+    header = header_bytes  + b"||"
+    padded_header = header.ljust(header_size, b'\x00')
+    ciphertext = padded_header + ciphertext
+    return ciphertext
 
 
 def create_signature(private_key, data):
@@ -96,7 +100,7 @@ def generate_session_key(expiration_time=3600):
     expiration_timestamp = time.time() + expiration_time
 
     # Return the session key and expiration timestamp as a tuple
-    return session_key, expiration_timestamp
+    return session_key
 
 
 def extract_expire_time(session_key):
@@ -134,3 +138,7 @@ def decrypt_data(key, encrypted_data):
 
     # Return the decrypted data
     return data
+
+def make_header(header):
+    padded_header = header.ljust(header_size, b'\x00')
+    return padded_header

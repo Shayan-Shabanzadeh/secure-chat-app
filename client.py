@@ -1,3 +1,4 @@
+from utils import *
 import os
 import random
 import socket
@@ -9,12 +10,13 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.fernet import Fernet
+import time
 
 
 signup_pattern = r"SIGNUP (\S+) (\S+)"
 nonce = ""
-header_size = 500
-
+master_key = None
+isLogin = False
 
 def dataSplit(data):
     data_header = data[:header_size].decode()
@@ -128,31 +130,30 @@ def encrypt_for_signup(message):
     global nonce
     # Generate a random nonce
     nonce = str(random.randint(1, 1000000))
-
     # Append client public key, nonce, and message
     data = nonce + "||" + message
     data = data.encode()
-    # Encrypt the data with server's public key
-    try:
-        ciphertext = server_public_key.encrypt(
-            data,
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None
-            )
+  
+    ciphertext = server_public_key.encrypt(
+        data,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
         )
-        # Encryption successful
-        print("Encryption successful.")
-    except Exception as e:
-        # Encryption failed
-        print("Encryption failed:", str(e))
+    )
+    # Encryption successful
+    print("Encryption successful.")
+
 
     header = b"SIGNUP||" + public_key_bytes + b"||"
     padded_header = header.ljust(header_size, b'\x00')
     ciphertext = padded_header + ciphertext
     return ciphertext
 
+def encrypt_for_login(message):
+    encrypted_message = encode_with_public_key(server_public_key_bytes,message,"LOGIN")
+    return encrypted_message
 
 # AES encryption key (must be 16, 24, or 32 bytes long)
 KEY = b'mysecretpassword'
@@ -185,10 +186,10 @@ def decrypt(data):
 # function to receive data from server
 def receive_data(server_socket):
     while True:
-
         data = server_socket.recv(1024)
+        if(len(data)<500):
+            print(data.decode())
         data_header, data_main = dataSplit(data)
-
         if data_header.startswith("SIGNUP"):
             decrypted_response = private_key.decrypt(
                 data_main,
@@ -203,6 +204,23 @@ def receive_data(server_socket):
             if decrypted_message_parts[0] == nonce:
                 print(decrypted_message_parts[1])
 
+        if(data_header.startswith("LOGIN")):
+            decrypted_response = private_key.decrypt(
+                data_main,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+                )
+            )
+            decrypted_message = decrypted_response.decode()
+            decrypted_message_parts = decrypted_message.split("||")
+            global master_key
+            master_key = decrypted_message_parts[1]
+            print(master_key)
+            print("successfully logined")
+            global isLogin
+            isLogin = True
 
 # function to send data to server
 def send_data(server_socket):
@@ -212,15 +230,20 @@ def send_data(server_socket):
         if message.startswith("SIGNUP"):
             message = encrypt_for_signup(message)
             server_socket.send(message)
-        else:
-            print("Invalid command.")
+        elif message.startswith("LOGIN"):
+            if(isLogin) : 
+                print("You are loged in!")
+            else:
+                message = encrypt_for_login(message)
+                server_socket.send(message)
         # match = re.match(signup_pattern, message)
         # if match:
         #     message = encrypt_first_message(message)
         #     print(message)
         # send data to server
         # server_socket.send(message)
-
+        else:
+            print("Invalid command.")
 
 # function to connect to server
 def connect_to_server():

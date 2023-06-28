@@ -1,3 +1,4 @@
+from utils import *
 import socket
 import threading
 from collections import defaultdict
@@ -110,7 +111,7 @@ def handle_client(client_socket, client_address):
 
         # handle login
         if data_header.upper().startswith("LOGIN"):
-            _username = handle_login(client_socket, data)
+            _username = handle_login(client_socket, data_main)
 
         # handle signup
         elif data_header.upper().startswith("SIGNUP"):
@@ -234,7 +235,6 @@ def handle_group(client_socket, data, username):
 def handle_signup(client_socket, data_header, data_main):
     data_header_parts = data_header.split("||")
     serialized_public_key = data_header_parts[1].encode()
-    print("serialized_public_key : " + str(serialized_public_key))
     # Deserialize the public key from bytes
     public_key = serialization.load_pem_public_key(
         serialized_public_key,
@@ -275,15 +275,23 @@ def handle_signup(client_socket, data_header, data_main):
     return username
 
 
-def handle_login(client_socket, data):
-    _, username, password = data.split()
-    if username not in users:
-        client_socket.send("Error: Invalid username or password")
-    elif not bcrypt.checkpw(password.encode(), users[username]):
-        client_socket.send("Error: Invalid username or password")
+def handle_login(client_socket, data_main):
+    time_stamps, message = decrypt_first_message(data_main, server_private_key)
+    _, username, password = message.split()
+    user = server_repository.find_user_by_username(username=username)
+    if(user == None):
+        client_socket.send("Error: Invalid username or password".encode())
+    elif not bcrypt.checkpw(password.encode(), user.password):
+        client_socket.send("Error: Invalid username or password".encode())
     else:
-        clients[username] = client_socket
-        client_socket.send("Login successful")
+        server_repository.change_user_status(username,True)
+        
+        master_key = generate_session_key()
+        server_repository.set_master_key(username,master_key)
+        message = master_key
+        public_key = user.public_key
+        encrypted_message = encode_with_public_key(public_key,message,"LOGIN")
+        client_socket.send(encrypted_message)
     return username
 
 
