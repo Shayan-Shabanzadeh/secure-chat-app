@@ -8,6 +8,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 
+import server_repository
+
 header_size = 500
 # Load the private key from the file
 with open("server_private_key.pem", "rb") as file:
@@ -118,19 +120,28 @@ def handle_client(client_socket, client_address):
 
             data_header_parts = data_header.split("||")
             serialized_public_key = data_header_parts[1].encode()
+            print("serialized_public_key : " + str(serialized_public_key))
             # Deserialize the public key from bytes
             public_key = serialization.load_pem_public_key(
                 serialized_public_key,
                 backend=default_backend()
             )
             nonce, message = decrypt_first_message(data_main, server_private_key)
+            print(message)
             _, username, password = message.split()
-            if username in users:
+            user = server_repository.find_user_by_username(username=username)
+            if user:
                 msg = "Error: Username already exists"
             else:
-                msg = "successfully signed up"
                 salt = bcrypt.gensalt()
-                users[username] = bcrypt.hashpw(password.encode(), salt)
+                password = bcrypt.hashpw(password.encode(), salt)
+                try:
+                    server_repository.add_user(username=username, password=password, public_key=serialized_public_key,
+                                               is_online=False)
+                    msg = "signup successful."
+                except Exception as e:
+                    print(e)
+                    msg = "Something went wrong."
 
             response_message = nonce + "||" + msg
             response_message = response_message.encode()
@@ -261,4 +272,9 @@ def start_server():
 
 
 if __name__ == "__main__":
-    start_server()
+    try:
+        print("init database.")
+        server_repository.initialize_database()
+        start_server()
+    except Exception as e:
+        print(e)

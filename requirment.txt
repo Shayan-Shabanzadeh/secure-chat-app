@@ -17,5 +17,7 @@ pycryptodomex==3.18.0
 PyYAML==6.0
 requests==2.31.0
 shellescape==3.8.1
+SQLAlchemy==2.0.17
+typing_extensions==4.6.3
 urllib3==2.0.3
 Werkzeug==2.3.6
