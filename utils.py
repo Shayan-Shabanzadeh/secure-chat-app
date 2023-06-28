@@ -4,6 +4,7 @@ import time
 
 import cryptography
 from cryptography.hazmat.primitives import serialization, asymmetric, hashes
+from cryptography.fernet import Fernet
 
 
 def encode_with_public_key(public_key, message):
@@ -107,3 +108,29 @@ def extract_expire_time(session_key):
 
     # Return the expiration datetime
     return expiration_datetime
+
+def encrypt_data(key, data):
+    # Create a Fernet cipher object with the key
+    cipher = Fernet(key)
+
+    # Convert the data to bytes
+    data_bytes = data.encode()
+
+    # Encrypt the data
+    encrypted_data = cipher.encrypt(data_bytes)
+
+    # Return the encrypted data
+    return encrypted_data
+
+def decrypt_data(key, encrypted_data):
+    # Create a Fernet cipher object with the key
+    cipher = Fernet(key)
+
+    # Decrypt the encrypted data
+    decrypted_data = cipher.decrypt(encrypted_data)
+
+    # Convert the decrypted data to a string
+    data = decrypted_data.decode()
+
+    # Return the decrypted data
+    return data

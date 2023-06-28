@@ -1,10 +1,10 @@
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, asc
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-
+from utils import *
 Base = declarative_base()
 Session = sessionmaker()
-
+MyKey = None
 
 def initialize_database():
     # Create the engine for the database
@@ -24,12 +24,13 @@ def find_session_key(username):
     session_key = session.query(SessionKeys).filter_by(username=username).first()
     session.close()
     if session_key:
-        return session_key.session_key
+        return decrypt_data(MyKey,session_key.session_key)
     else:
         return None
 
-
+#session_key should be serialized 
 def add_session_key(username, session_key, expire_time, public_key):
+    session_key = encrypt_data(MyKey,session_key)
     session = Session()
     try:
         session_key = SessionKeys(username=username, session_key=session_key, expire_time=expire_time,
@@ -70,12 +71,16 @@ def find_messages_between_users(user1, user2):
         ((Chat.sender == user2) & (Chat.receiver == user1))
     ).order_by(asc(Chat.time), asc(Chat.sequence_number)).all()
     session.close()
-    return messages
+    decrypted_messages = []
+    for message in messages:
+        decrypted_messages.append(decrypt_data(MyKey,messages))
+    return decrypted_messages
 
 def add_chat_message(sender, receiver, message, time, sequence_number):
+    encrypted_message = encrypt_data(MyKey,message)
     session = Session()
     try:
-        chat_message = Chat(sender=sender, receiver=receiver, message=message, time=time, sequence_number=sequence_number)
+        chat_message = Chat(sender=sender, receiver=receiver, message=encrypted_message, time=time, sequence_number=sequence_number)
         session.add(chat_message)
         session.commit()
         return True
