@@ -8,6 +8,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.fernet import Fernet
 
 
 signup_pattern = r"SIGNUP (\S+) (\S+)"
@@ -33,6 +34,7 @@ def generate_key_pair():
 
 
 def save_private_key(private_key, password, filename):
+    global MyKey
     salt = os.urandom(16)
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -41,12 +43,12 @@ def save_private_key(private_key, password, filename):
         iterations=100000,
         backend=default_backend()
     )
-    key = kdf.derive(password.encode())
+    MyKey = kdf.derive(password.encode())
 
     encrypted_private_key = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.BestAvailableEncryption(key),
+        encryption_algorithm=serialization.BestAvailableEncryption(MyKey),
     )
 
     with open(filename, "wb") as file:
@@ -77,6 +79,7 @@ server_public_key = serialization.load_pem_public_key(
 private_key_file = "private_key.pem"
 public_key_file = "public_key.pem"
 
+
 if os.path.isfile(private_key_file) and os.path.isfile(public_key_file):
     password = input("Enter password for the existing private key: ")
 
@@ -95,11 +98,11 @@ if os.path.isfile(private_key_file) and os.path.isfile(public_key_file):
         iterations=100000,
         backend=default_backend()
     )
-    key = kdf.derive(password_attempt.encode())
+    MyKey = kdf.derive(password_attempt.encode())
 
     private_key = serialization.load_pem_private_key(
         encrypted_private_key,
-        password=key,
+        password=MyKey,
         backend=default_backend()
     )
 
@@ -153,6 +156,8 @@ def encrypt_for_signup(message):
 
 # AES encryption key (must be 16, 24, or 32 bytes long)
 KEY = b'mysecretpassword'
+
+
 
 
 # function to encrypt data
