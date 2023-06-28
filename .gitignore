@@ -8,6 +8,8 @@ __pycache__/
 .idea
 # Distribution / packaging
 .Python
+client_database.db
+server_database.db
 build/
 develop-eggs/
 dist/
