@@ -17,6 +17,7 @@ signup_pattern = r"SIGNUP (\S+) (\S+)"
 nonce = ""
 master_key = None
 isLogin = False
+username = None 
 
 def dataSplit(data):
     data_header = data[:header_size].decode()
@@ -155,6 +156,10 @@ def encrypt_for_login(message):
     encrypted_message = encode_with_public_key(server_public_key_bytes,message,"LOGIN")
     return encrypted_message
 
+def encrypt_for_logout():
+    encrypted_message = encrypt_with_master_key(master_key,"","LOGOUT||" + username)
+    return encrypted_message
+
 # AES encryption key (must be 16, 24, or 32 bytes long)
 KEY = b'mysecretpassword'
 
@@ -232,10 +237,21 @@ def send_data(server_socket):
             server_socket.send(message)
         elif message.startswith("LOGIN"):
             if(isLogin) : 
-                print("You are loged in!")
+                print("You have already Logged in!")
             else:
+                message_parts = message.split()
+                global username
+                username = message_parts[1]
                 message = encrypt_for_login(message)
                 server_socket.send(message)
+        elif message.startswith("LOGOUT"):
+            if(isLogin == False):
+                print("You should Login first!")
+            else:
+                message = encrypt_for_logout()
+                server_socket.send(message)
+                isLogin = False
+                print("User Logged out successfully")
         # match = re.match(signup_pattern, message)
         # if match:
         #     message = encrypt_first_message(message)

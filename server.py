@@ -100,8 +100,11 @@ def handle_client(client_socket, client_address):
         # receive data from the client
         try:
             data = client_socket.recv(1024)
-            data_header = data[:header_size].decode()
-            data_main = data[header_size:]
+            if(len(data) >= 500):
+                data_header = data[:header_size].decode()
+                data_main = data[header_size:]
+            else:
+                data_header = data.decode()
         except ValueError:
             print("Error")
             client_socket.send("Error: Key incorrect or message corrupted".encode())
@@ -112,6 +115,10 @@ def handle_client(client_socket, client_address):
         # handle login
         if data_header.upper().startswith("LOGIN"):
             _username = handle_login(client_socket, data_main)
+
+        # handle login
+        elif data_header.upper().startswith("LOGOUT"):
+            _username = handle_logout(client_socket, data_header,data_main)
 
         # handle signup
         elif data_header.upper().startswith("SIGNUP"):
@@ -288,12 +295,19 @@ def handle_login(client_socket, data_main):
         
         master_key = generate_session_key()
         server_repository.set_master_key(username,master_key)
-        message = master_key
+        message = master_key.decode()
         public_key = user.public_key
         encrypted_message = encode_with_public_key(public_key,message,"LOGIN")
         client_socket.send(encrypted_message)
     return username
 
+def handle_logout(client_socket, data_header, data_main):
+    data_header_parts = data_header.split("||")
+    user = server_repository.find_user_by_username(data_header_parts[1])
+    decrypted_data = decrypt_data(user.master_key,data_main)
+    decrypted_data_parts = decrypted_data.split("||")
+    server_repository.change_user_status(user.username,False) 
+    return user.username
 
 # function to start server
 def start_server():

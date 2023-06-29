@@ -94,13 +94,13 @@ def decode_with_private_key(private_key, ciphertext):
 
 def generate_session_key(expiration_time=3600):
     # Generate a random session key using secrets module
-    session_key = secrets.token_hex(16)
+    key = Fernet.generate_key()
 
     # Calculate the expiration timestamp
     expiration_timestamp = time.time() + expiration_time
 
     # Return the session key and expiration timestamp as a tuple
-    return session_key
+    return key
 
 
 def extract_expire_time(session_key):
@@ -112,6 +112,22 @@ def extract_expire_time(session_key):
 
     # Return the expiration datetime
     return expiration_datetime
+
+def encrypt_with_master_key(master_key,message,header):
+
+    timestamp = int(time.time())
+    # Append client public key, nonce, and message
+    data = str(timestamp) + "||" + message
+    data = data.encode()
+    ciphertext = encrypt_data(master_key,message)
+    header_bytes = bytes(header, 'utf-8')
+    header = header_bytes  + b"||"
+    padded_header = header.ljust(header_size, b'\x00')
+    ciphertext = padded_header + ciphertext
+    return ciphertext
+
+
+
 
 def encrypt_data(key, data):
     # Create a Fernet cipher object with the key
@@ -127,6 +143,7 @@ def encrypt_data(key, data):
     return encrypted_data
 
 def decrypt_data(key, encrypted_data):
+   
     # Create a Fernet cipher object with the key
     cipher = Fernet(key)
 
