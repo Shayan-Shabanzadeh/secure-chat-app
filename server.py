@@ -275,15 +275,27 @@ def handle_signup(client_socket, data_header, data_main):
     return username
 
 
+
+
 def handle_login(client_socket, data):
     _, username, password = data.split()
-    if username not in users:
-        client_socket.send("Error: Invalid username or password")
-    elif not bcrypt.checkpw(password.encode(), users[username]):
-        client_socket.send("Error: Invalid username or password")
+    user = server_repository.find_user_by_username(username=username)
+    if user:
+        if bcrypt.checkpw(password.encode(), user.password):
+            if user.is_online:
+                response_message = "User already logged in"
+            else:
+                response_message = "Logged in successfully"
+                server_repository.update_user_online_status(username=username, is_online=True)
+
+        else:
+            response_message = "Invalid password"
+
     else:
-        clients[username] = client_socket
-        client_socket.send("Login successful")
+        response_message = "Error: Invalid username"
+
+    response_message = encrypt_for_login(response_message)
+    client_socket.send(response_message)
     return username
 
 

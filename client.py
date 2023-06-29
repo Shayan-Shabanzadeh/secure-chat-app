@@ -62,6 +62,34 @@ def save_public_key(public_key, filename):
     with open(filename, "wb") as file:
         file.write(public_key_bytes)
 
+def login(client_socket):
+    global nonce
+    nonce = str(random.randint(10000, 99999))
+
+    # Send the nonce to the server
+    client_socket.sendall(nonce.encode())
+
+    # Receive the encrypted nonce from the server
+    encrypted_nonce = client_socket.recv(1024)
+
+    # Decrypt the nonce using the private key
+    decrypted_nonce = private_key.decrypt(
+        encrypted_nonce,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    ).decode()
+
+    if decrypted_nonce == nonce:
+        print("Login successful!")
+        return True
+    else:
+        print("Login failed!")
+        return False
+
+
 
 # Load the server's public key from the file
 with open("server_public_key.pem", "rb") as file:
@@ -120,6 +148,33 @@ else:
     save_private_key(private_key, password, private_key_file)
     save_public_key(public_key, public_key_file)
 
+
+def send_login_request(self, username, password):
+    login_message = f"LOGIN {username} {password}"
+    encrypted_message = self.encrypt(login_message)
+    self.client_socket.send(encrypted_message)
+
+
+def encrypt_for_login(message, server_public_key):
+    session_key = os.urandom(16)
+    cipher = AES.new(session_key, AES.MODE_EAX)
+    ciphertext, tag = cipher.encrypt_and_digest(message.encode())
+    encrypted_session_key = server_public_key.encrypt(session_key, padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
+
+    return encrypted_session_key + cipher.nonce + tag + ciphertext
+
+
+def decrypt_for_login(self, encrypted_message):
+    session_key = self.private_key.decrypt(encrypted_message[:256],
+                                           padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                                                        algorithm=hashes.SHA256(), label=None))
+    nonce = encrypted_message[256:272]
+    tag = encrypted_message[272:288]
+    ciphertext = encrypted_message[288:]
+    cipher = AES.new(session_key, AES.MODE_EAX, nonce)
+    plaintext = cipher.decrypt_and_verify(ciphertext, tag)
+
+    return plaintext
 
 def encrypt_for_signup(message):
     global nonce
@@ -198,6 +253,19 @@ def receive_data(server_socket):
             if decrypted_message_parts[0] == nonce:
                 print(decrypted_message_parts[1])
 
+        elif (data_header.startswith("LOGIN")):
+            decrypted_response = private_key.decrypt(
+                data_main,
+                padding.OAEP(
+                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                    algorithm=hashes.SHA256(),
+                    label=None
+                )
+            )
+            decrypted_message = decrypted_response.decode()
+            decrypted_message_parts = decrypted_message.split("||")
+
+            #TO DO
 
 # function to send data to server
 def send_data(server_socket):
@@ -207,6 +275,11 @@ def send_data(server_socket):
         if message.startswith("SIGNUP"):
             message = encrypt_for_signup(message)
             server_socket.send(message)
+
+        elif message.startswith("LOGIN"):
+            message = login(message)
+            server_socket.send(message)
+
         else:
             print("Invalid command.")
         # match = re.match(signup_pattern, message)
