@@ -1,26 +1,25 @@
-from utils import *
 import os
 import random
 import socket
 import threading
-import client_repository
+
 from Cryptodome.Cipher import AES
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.fernet import Fernet
-import time
 
+import client_repository
+from utils import *
 
 signup_pattern = r"SIGNUP (\S+) (\S+)"
 nonce = ""
 master_key = None
 isLogin = False
-username = None 
+username = None
 public_key = None
 private_key = None
-public_key_bytes  = None
+public_key_bytes = None
 private_key_bytes = None
 session_keys = {}
 dest_user = None
@@ -28,6 +27,7 @@ dest_user_message = None
 dest_user_public_key = None
 diffie_private_key = None
 diffie_public_key = None
+
 
 def dataSplit(data):
     data_header = data[:header_size].decode()
@@ -44,6 +44,7 @@ def generate_key_pair():
     public_key = private_key.public_key()
 
     return private_key, public_key
+
 
 def encrypt_private_key(private_key, password):
     global MyKey
@@ -64,8 +65,9 @@ def encrypt_private_key(private_key, password):
     )
     return salt + encrypted_private_key
 
+
 def save_private_key(private_key_bytes):
-     # Create the "keys" subfolder if it doesn't exist
+    # Create the "keys" subfolder if it doesn't exist
     os.makedirs("keys", exist_ok=True)
 
     # Generate the filename
@@ -77,7 +79,7 @@ def save_private_key(private_key_bytes):
 
 
 def save_public_key(public_key_bytes):
-     # Create the "keys" subfolder if it doesn't exist
+    # Create the "keys" subfolder if it doesn't exist
     os.makedirs("keys", exist_ok=True)
 
     # Generate the filename
@@ -86,6 +88,7 @@ def save_public_key(public_key_bytes):
     # Write the public key bytes to the file
     with open(filename, "wb") as file:
         file.write(public_key_bytes)
+
 
 # Load the server's public key from the file
 with open("server_public_key.pem", "rb") as file:
@@ -96,7 +99,6 @@ server_public_key = serialization.load_pem_public_key(
     server_public_key_bytes,
     backend=default_backend()
 )
-
 
 
 # if os.path.isfile(private_key_file) and os.path.isfile(public_key_file):
@@ -143,7 +145,6 @@ server_public_key = serialization.load_pem_public_key(
 #     save_public_key(public_key)
 
 
-    
 def find_private_key(username, password):
     keys_folder = os.path.join(os.getcwd(), "keys")
     private_key_filename = f"{username}_private_key.pem"
@@ -176,11 +177,12 @@ def find_private_key(username, password):
     except (ValueError, TypeError):
         return None
 
+
 def encrypt_for_signup(message):
     global username
     username = message.split()[1]
     password = message.split()[2]
-    global private_key,public_key
+    global private_key, public_key
     private_key, public_key = generate_key_pair()
     global public_key_bytes
     public_key_bytes = public_key.public_bytes(
@@ -188,14 +190,14 @@ def encrypt_for_signup(message):
         format=serialization.PublicFormat.SubjectPublicKeyInfo
     )
     global private_key_bytes
-    private_key_bytes = encrypt_private_key(private_key,password) 
+    private_key_bytes = encrypt_private_key(private_key, password)
     global nonce
     # Generate a random nonce
     nonce = str(random.randint(1, 1000000))
     # Append client public key, nonce, and message
     data = nonce + "||" + message
     data = data.encode()
-  
+
     ciphertext = server_public_key.encrypt(
         data,
         padding.OAEP(
@@ -210,18 +212,20 @@ def encrypt_for_signup(message):
     ciphertext = padded_header + ciphertext
     return ciphertext
 
+
 def encrypt_for_login(message):
-    encrypted_message = encode_with_public_key(server_public_key_bytes,message,"LOGIN")
+    encrypted_message = encode_with_public_key(server_public_key_bytes, message, "LOGIN")
     username = message.split()[1]
     password = message.split()[2]
     global private_key
-    private_key = find_private_key(username,password)
-    if(private_key == None):
+    private_key = find_private_key(username, password)
+    if (private_key == None):
         print("there is not such a user with this password!")
     return encrypted_message
 
+
 def clear_data():
-    global private_key, public_key,private_key_bytes,public_key_bytes, username, master_key
+    global private_key, public_key, private_key_bytes, public_key_bytes, username, master_key
     private_key = None
     public_key = None
     private_key_bytes = None
@@ -229,16 +233,19 @@ def clear_data():
     username = None
     master_key = None
 
+
 def encrypt_for_logout():
+    global username
+    encrypted_message = encrypt_with_master_key(master_key, "", "LOGOUT||" + username)
     clear_data()
-    encrypted_message = encrypt_with_master_key(master_key,"","LOGOUT||" + username)
     return encrypted_message
 
 
 def encrypt_for_public_key(user_des):
-    header = "PUBLIC||" + username+ "||" + user_des
-    encrypted_message = encrypt_with_master_key(master_key,"",header)
+    header = "PUBLIC||" + username + "||" + user_des
+    encrypted_message = encrypt_with_master_key(master_key, "", header)
     return encrypted_message
+
 
 # AES encryption key (must be 16, 24, or 32 bytes long)
 KEY = b'mysecretpassword'
@@ -268,13 +275,13 @@ def decrypt(data):
 
 def handle_signup(data_main):
     decrypted_response = private_key.decrypt(
-                data_main,
-                padding.OAEP(
-                    mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                    algorithm=hashes.SHA256(),
-                    label=None
-                )
-            )
+        data_main,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
     decrypted_message = decrypted_response.decode()
     decrypted_message_parts = decrypted_message.split("||")
     if decrypted_message_parts[0] == nonce:
@@ -283,62 +290,65 @@ def handle_signup(data_main):
     save_private_key(private_key_bytes)
     save_public_key(public_key_bytes)
 
+
 def handle_login(data_main):
     decrypted_response = private_key.decrypt(
-                    data_main,
-                    padding.OAEP(
-                        mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                        algorithm=hashes.SHA256(),
-                        label=None
-                    )
-                )
+        data_main,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
     decrypted_message = decrypted_response.decode()
     decrypted_message_parts = decrypted_message.split("||")
     global master_key
     master_key = decrypted_message_parts[1]
+    _username = decrypted_message_parts[2]
+    global username
+    username = _username
     print(master_key)
     print("successfully logined")
     global isLogin
-    isLogin = True  
+    isLogin = True
 
-def handle_public(data_header,data_main,server_socket):
-    data_main = decrypt_data(master_key,data_main)
+
+def handle_public(data_header, data_main, server_socket):
+    data_main = decrypt_data(master_key, data_main)
     data_header_parts = data_header.split()
     global dest_user_public_key
     dest_user_public_key_bytes = data_header_parts[1]
     dest_user_public_key = serialization.load_pem_public_key(
-    dest_user_public_key_bytes,
-    backend=default_backend()
+        dest_user_public_key_bytes,
+        backend=default_backend()
     )
     global diffie_private_key, diffie_public_key
     diffie_private_key = diffie_generate_private_key()
     diffie_public_key = diffie_generate_public_key(diffie_private_key)
     header = "REQUEST_SESSION||" + username
-    encrypted_message = encode_with_public_key(dest_user_public_key,str(diffie_public_key).encode(),header)
+    encrypted_message = encode_with_public_key(dest_user_public_key, str(diffie_public_key).encode(), header)
     header = "FORWARD||" + username + "||" + dest_user
-    super_encryptes_message = encrypt_with_master_key(master_key,encrypted_message,header)
+    super_encryptes_message = encrypt_with_master_key(master_key, encrypted_message, header)
     server_socket.send(super_encryptes_message)
+
 
 # function to receive data from server
 def receive_data(server_socket):
     while True:
         data = server_socket.recv(1024)
-        if(len(data)<500):
+        if (len(data) < 500):
             print(data.decode())
         else:
             data_header, data_main = dataSplit(data)
 
-
             if data_header.startswith("SIGNUP"):
                 handle_signup(data_main)
 
-            if(data_header.startswith("LOGIN")):
+            if (data_header.startswith("LOGIN")):
                 handle_login(data_main)
-                
-            if(data_header.startswith("PUBLIC")):
-                handle_public(data_header,data_main,server_socket)
 
-
+            if (data_header.startswith("PUBLIC")):
+                handle_public(data_header, data_main, server_socket)
 
 
 # function to send data to server
@@ -352,7 +362,7 @@ def send_data(server_socket):
             server_socket.send(message)
         elif message.startswith("LOGIN"):
             global isLogin
-            if(isLogin) : 
+            if (isLogin):
                 print("You have already Logged in!")
             else:
                 message_parts = message.split()
@@ -361,7 +371,7 @@ def send_data(server_socket):
                 message = encrypt_for_login(message)
                 server_socket.send(message)
         elif message.startswith("LOGOUT"):
-            if(isLogin == False):
+            if (isLogin == False):
                 print("You should Login first!")
             else:
                 message = encrypt_for_logout()
@@ -371,7 +381,7 @@ def send_data(server_socket):
         elif message.startswith("PRIVATE"):
             messaage_parts = message.split()
             user_dest = session_keys.get(messaage_parts[1])
-            if(user_dest == None):
+            if (user_dest == None):
                 message = encrypt_for_public_key(messaage_parts[1])
                 server_socket.send(message)
         # match = re.match(signup_pattern, message)
@@ -383,13 +393,14 @@ def send_data(server_socket):
         else:
             print("Invalid command.")
 
+
 # function to connect to server
 def connect_to_server():
     # create socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     # connect to server
-    server_address = ("localhost", 8000)
+    server_address = ("localhost", 9000)
     server_socket.connect(server_address)
 
     # start thread to receive data from server
