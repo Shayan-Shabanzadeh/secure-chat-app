@@ -5,8 +5,6 @@ from collections import defaultdict
 import bcrypt
 from Cryptodome.Cipher import AES
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.asymmetric import padding
 
 import server_repository
 from utils import *
@@ -100,7 +98,7 @@ def handle_client(client_socket, client_address):
         # receive data from the client
         try:
             data = client_socket.recv(1024)
-            if (len(data) >= 500):
+            if len(data) >= 500:
                 data_header = data[:header_size].decode()
                 data_main = data[header_size:]
             else:
@@ -290,7 +288,7 @@ def handle_login(client_socket, data_main):
     time_stamps, message = decrypt_first_message(data_main, server_private_key)
     _, username, password = message.split()
     user = server_repository.find_user_by_username(username=username)
-    if (user == None):
+    if user is None:
         client_socket.send("Error: Invalid username or password".encode())
     elif not bcrypt.checkpw(password.encode(), user.password):
         client_socket.send("Error: Invalid username or password".encode())
@@ -319,10 +317,10 @@ def handle_public(client_socket, data_header, data_main):
     data_header_parts = data_header.split("||")
 
     user1 = server_repository.find_user_by_username(data_header_parts[1])
-    if (user1 == None or user1.is_online == False):
+    if user1 is None or user1.is_online is False:
         client_socket.send("You should Login first!".encode())
     user2 = server_repository.find_user_by_username(data_header_parts[2])
-    if (user2 == None or user2.is_online == False):
+    if user2 is None or user2.is_online is False:
         client_socket.send("this user is not online!".encode())
     decrypted_data = decrypt_data(user1.master_key, data_main)
     decrypted_data_parts = decrypted_data.split("||")
@@ -335,7 +333,7 @@ def handle_forward(client_socket, data_header, data_main):
     data_header_parts = data_header.split("||")
     from_user = server_repository.find_user_by_username(data_header_parts[1])
     dest_user = server_repository.find_user_by_username(data_header_parts[2])
-    if (from_user == None or dest_user == None):
+    if from_user is None or dest_user is None:
         client_socket.send("something is wrong!".encode())
     dest_user_socket = clients.get(dest_user)
     message = decrypt_data(from_user.master_key, data_main)
