@@ -1,3 +1,4 @@
+import os
 import socket
 import threading
 
@@ -21,7 +22,6 @@ private_key_bytes = None
 session_keys = {}
 dest_user = None
 dest_user_message = None
-dest_user_public_key = None
 diffie_private_key = None
 diffie_public_key = None
 
@@ -238,9 +238,19 @@ def encrypt_for_logout():
     return encrypted_message
 
 
-def encrypt_for_public_key(user_des):
-    header = "PUBLIC||" + username + "||" + user_des
-    encrypted_message = encrypt_with_master_key(master_key, "", header)
+def encrypt_for_public_key(user_des: str):
+    # PUBLIC||USERNAME||E(USER_DES)
+    global username
+    if not username:
+        print("You must login first.")
+        return
+    if not user_des:
+        print("recipient can not be empty.")
+        return
+    _username = str(username)
+    header = "PUBLIC||" + _username
+    message = user_des
+    encrypted_message = encrypt_with_master_key(master_key, message, header)
     return encrypted_message
 
 
@@ -311,22 +321,45 @@ def handle_login(data_main):
 
 
 def handle_public(data_header, data_main, server_socket):
-    data_main = decrypt_data(master_key, data_main)
+    # FORWARD||USERNAME||DEST_USERNAME(E(REQUEST_SESSION||USERNAME||E(diffie_public))
+    # TODO check timestamps
+    decrypted_data = decrypt_data(master_key, data_main)
+    _dest_user = decrypted_data.split("||")[1]
+    if not dest_user:
+        print("destination user not found ")
+        return
     data_header_parts = data_header.split()
-    global dest_user_public_key
+    global username, diffie_private_key, diffie_public_key
+    if not username:
+        print("you must login first.")
+        return
+    _username = str(username)
     dest_user_public_key_bytes = data_header_parts[1]
     dest_user_public_key = serialization.load_pem_public_key(
         dest_user_public_key_bytes,
         backend=default_backend()
     )
-    global diffie_private_key, diffie_public_key
     diffie_private_key = diffie_generate_private_key()
     diffie_public_key = diffie_generate_public_key(diffie_private_key)
-    header = "REQUEST_SESSION||" + username
+    header = "REQUEST_SESSION||" + _username
     encrypted_message = encode_with_public_key(dest_user_public_key, str(diffie_public_key).encode(), header)
-    header = "FORWARD||" + username + "||" + dest_user
-    super_encryptes_message = encrypt_with_master_key(master_key, encrypted_message, header)
-    server_socket.send(super_encryptes_message)
+    header = "FORWARD||" + _username + "||" + _dest_user
+    super_encrypted_message = encrypt_with_master_key(master_key, encrypted_message, header)
+    server_socket.send(super_encrypted_message)
+
+
+def handle_send_private(server_socket, message):
+    messages_part = message.split()
+    _dest_user = messages_part[1]
+    if not _dest_user:
+        print("dest user is not define.")
+        return
+    global dest_user
+    dest_user = _dest_user
+    dest_user_session = session_keys.get(_dest_user)
+    if not dest_user_session:
+        message = encrypt_for_public_key(messages_part[1])
+        server_socket.send(message)
 
 
 # function to receive data from server
@@ -376,11 +409,8 @@ def send_data(server_socket):
                 isLogin = False
                 print("User Logged out successfully")
         elif message.startswith("PRIVATE"):
-            messaage_parts = message.split()
-            user_dest = session_keys.get(messaage_parts[1])
-            if not user_dest:
-                message = encrypt_for_public_key(messaage_parts[1])
-                server_socket.send(message)
+            handle_send_private(server_socket, message)
+
         # server_socket.send(message)
         else:
             print("Invalid command.")

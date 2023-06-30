@@ -319,13 +319,16 @@ def handle_public(client_socket, data_header, data_main):
     user1 = server_repository.find_user_by_username(data_header_parts[1])
     if user1 is None or user1.is_online is False:
         client_socket.send("You should Login first!".encode())
-    user2 = server_repository.find_user_by_username(data_header_parts[2])
+    user_des = decrypt_data(user1.master_key, data_main)
+    if not user_des:
+        client_socket.send("user destination can not be empty.")
+
+    user2 = server_repository.find_user_by_username(user_des)
     if user2 is None or user2.is_online is False:
         client_socket.send("this user is not online!".encode())
-    decrypted_data = decrypt_data(user1.master_key, data_main)
-    decrypted_data_parts = decrypted_data.split("||")
+
     header = "PUBLIC||" + user2.public_key
-    encrypted_message = encrypt_with_master_key(user1.master_key, "", header)
+    encrypted_message = encrypt_with_master_key(user1.master_key, user2.username, header)
     client_socket.send(encrypted_message)
 
 
