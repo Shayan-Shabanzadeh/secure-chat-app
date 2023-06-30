@@ -71,7 +71,7 @@ def find_all_online_users():
     return [user.username for user in online_users]
 
 
-def find_user_by_username(username) -> User | None:
+def find_user_by_username(username):
     session = Session()
     try:
         user = session.query(User).filter_by(username=username).one()
