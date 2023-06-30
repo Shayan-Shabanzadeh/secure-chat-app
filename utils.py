@@ -1,14 +1,15 @@
-import time
 import random
 import time
+from datetime import datetime, timedelta
 
 import cryptography
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import serialization, asymmetric, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 
 header_size = 500
 time_stamps_threshold = 5
+seconds = 2
 # Prime number and primitive root (shared public values)
 p = 15790321  # A large prime number
 g = 5  # A small primitive root modulo p
@@ -29,6 +30,28 @@ def diffie_generate_session_key(private_key, received_public_key):
     return pow(received_public_key, private_key, p)
 
 
+def generate_master_key(expiration_time=3600):
+    # Generate a random session key using secrets module
+    key = Fernet.generate_key()
+
+    # Calculate the expiration timestamp
+    expiration_timestamp = time.time() + expiration_time
+
+    # Return the session key and expiration timestamp as a tuple
+    return key
+
+
+def extract_expire_time(session_key):
+    # Extract the expiration timestamp from the session key
+    expiration_timestamp = int(session_key[-10:], 16)
+
+    # Convert the expiration timestamp to a datetime object
+    expiration_datetime = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(expiration_timestamp))
+
+    # Return the expiration datetime
+    return expiration_datetime
+
+
 def encode_with_public_key(public_key, message, header):
     public_key = serialization.load_pem_public_key(public_key)
 
@@ -46,16 +69,24 @@ def encode_with_public_key(public_key, message, header):
                 label=None
             )
         )
-        # Encryption successful
+        header_bytes = bytes(header, 'utf-8')
+        header = header_bytes + b"||"
+        padded_header = header.ljust(header_size, b'\x00')
+        ciphertext = padded_header + ciphertext
         print("Encryption successful.")
+        return ciphertext
+        # Encryption successful
     except Exception as e:
         # Encryption failed
         print("Encryption failed:", str(e))
-    header_bytes = bytes(header, 'utf-8')
-    header = header_bytes + b"||"
-    padded_header = header.ljust(header_size, b'\x00')
-    ciphertext = padded_header + ciphertext
-    return ciphertext
+
+
+def check_message_timestamp(timestamp: int):
+    current_timestamp = datetime.now()
+    timestamp_datetime = datetime.fromtimestamp(timestamp)
+    time_difference = current_timestamp - timestamp_datetime
+    if time_difference > timedelta(seconds=seconds):
+        raise Exception("Message timestamp is older than 2 seconds.")
 
 
 def create_signature(private_key, data):
@@ -93,53 +124,26 @@ def verify_signature(public_key, message, signature):
         return False
 
 
-def decode_with_private_key(private_key, ciphertext):
-    private_key = serialization.load_pem_private_key(private_key.encode('utf-8'), password=None)
-
-    # Decrypt the ciphertext using the private key
-    plaintext = private_key.decrypt(
+def decode_with_private_key(ciphertext, private_key):
+    decrypted_data = private_key.decrypt(
         ciphertext,
-        asymmetric.padding.OAEP(
-            mgf=asymmetric.padding.MGF1(algorithm=hashes.SHA256()),
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
             algorithm=hashes.SHA256(),
             label=None
         )
     )
+    decrypted_data = decrypted_data.decode()
+    timestamp_str = decrypted_data.split("||")[0]
+    if not timestamp_str.isdigit():
+        raise ValueError("Timestamp format error")
 
-    # Extract the nonce, timestamp, and message from the plaintext
-    extracted_nonce = plaintext[:16]
-    extracted_timestamp = int.from_bytes(plaintext[16:26], 'big')
-    extracted_message = plaintext[26:].decode('utf-8')
-    return extracted_nonce, extracted_timestamp, extracted_message
-
-
-def generate_session_key(expiration_time=3600):
-    # Generate a random session key using secrets module
-    key = Fernet.generate_key()
-
-    # Calculate the expiration timestamp
-    expiration_timestamp = time.time() + expiration_time
-
-    # Return the session key and expiration timestamp as a tuple
-    return key
-
-
-def extract_expire_time(session_key):
-    # Extract the expiration timestamp from the session key
-    expiration_timestamp = int(session_key[-10:], 16)
-
-    # Convert the expiration timestamp to a datetime object
-    expiration_datetime = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(expiration_timestamp))
-
-    # Return the expiration datetime
-    return expiration_datetime
+    timestamp = int(timestamp_str)
+    check_message_timestamp(timestamp)
+    return decrypted_data
 
 
 def encrypt_with_master_key(master_key, message, header):
-    timestamp = int(time.time())
-    # Append client public key, nonce, and message
-    data = str(timestamp) + "||" + message
-    data = data.encode()
     ciphertext = encrypt_data(master_key, message)
     header_bytes = bytes(header, 'utf-8')
     header = header_bytes + b"||"
@@ -148,7 +152,12 @@ def encrypt_with_master_key(master_key, message, header):
     return ciphertext
 
 
-def encrypt_data(key, data):
+def encrypt_data(key, data, header):
+    header_bytes = bytes(header, 'utf-8')
+    header = header_bytes + b"||"
+    padded_header = header.ljust(header_size, b'\x00')
+    timestamp = int(time.time())
+    data = str(timestamp) + "||" + data
     # Create a Fernet cipher object with the key
     cipher = Fernet(key)
 
@@ -159,21 +168,30 @@ def encrypt_data(key, data):
     encrypted_data = cipher.encrypt(data_bytes)
 
     # Return the encrypted data
-    return encrypted_data
+    return padded_header + encrypted_data
 
 
 def decrypt_data(key, encrypted_data):
     # Create a Fernet cipher object with the key
     cipher = Fernet(key)
 
-    # Decrypt the encrypted data
-    decrypted_data = cipher.decrypt(encrypted_data)
+    try:
+        # Decrypt the encrypted data
+        decrypted_data = cipher.decrypt(encrypted_data)
 
-    # Convert the decrypted data to a string
-    data = decrypted_data.decode()
+        # Convert the decrypted data to a string
+        data = decrypted_data.decode()
+        timestamp_str = data.split("||")[0]
+        if not timestamp_str.isdigit():
+            raise ValueError("Timestamp format error")
 
-    # Return the decrypted data
-    return data
+        timestamp = int(timestamp_str)
+        check_message_timestamp(timestamp)
+
+        # Return the decrypted data
+        return data
+    except InvalidToken:
+        raise Exception("Invalid or corrupted encrypted data.")
 
 
 def make_header(header):

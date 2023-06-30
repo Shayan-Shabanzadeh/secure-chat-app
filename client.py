@@ -1,17 +1,16 @@
 import os
 import socket
 import threading
+import traceback
 
-from Cryptodome.Cipher import AES
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 import client_repository
+import utils
 from utils import *
 
-signup_pattern = r"SIGNUP (\S+) (\S+)"
-nonce = ""
 master_key = None
 isLogin = False
 username = None
@@ -98,50 +97,6 @@ server_public_key = serialization.load_pem_public_key(
 )
 
 
-# if os.path.isfile(private_key_file) and os.path.isfile(public_key_file):
-#     password = input("Enter password for the existing private key: ")
-
-#     with open(private_key_file, "rb") as file:
-#         encrypted_private_key = file.read()
-
-#     salt = encrypted_private_key[:16]
-#     encrypted_private_key = encrypted_private_key[16:]
-
-#     password_attempt = input("Enter the password again: ")
-
-#     kdf = PBKDF2HMAC(
-#         algorithm=hashes.SHA256(),
-#         length=32,
-#         salt=salt,
-#         iterations=100000,
-#         backend=default_backend()
-#     )
-#     MyKey = kdf.derive(password_attempt.encode())
-
-#     private_key = serialization.load_pem_private_key(
-#         encrypted_private_key,
-#         password=MyKey,
-#         backend=default_backend()
-#     )
-
-#     # Load the public key from the file
-#     with open("public_key.pem", "rb") as file:
-#         public_key_bytes = file.read()
-
-#         # Deserialize the public key from bytes
-#         public_key = serialization.load_pem_public_key(
-#             public_key_bytes,
-#             backend=default_backend()
-#         )
-
-# else:
-#     password = input("Enter password for new private key: ")
-
-#     private_key, public_key = generate_key_pair()
-#     save_private_key(private_key)
-#     save_public_key(public_key)
-
-
 def find_private_key(_username, password):
     keys_folder = os.path.join(os.getcwd(), "keys")
     private_key_filename = f"{_username}_private_key.pem"
@@ -188,25 +143,8 @@ def encrypt_for_signup(message):
     )
     global private_key_bytes
     private_key_bytes = encrypt_private_key(private_key, password)
-    global nonce
-    # Generate a random nonce
-    nonce = str(random.randint(1, 1000000))
-    # Append client public key, nonce, and message
-    data = nonce + "||" + message
-    data = data.encode()
-
-    ciphertext = server_public_key.encrypt(
-        data,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
-    )
-
-    header = b"SIGNUP||" + public_key_bytes + b"||"
-    padded_header = header.ljust(header_size, b'\x00')
-    ciphertext = padded_header + ciphertext
+    header = "SIGNUP||" + public_key_bytes.decode()
+    ciphertext = utils.encode_with_public_key(public_key=server_public_key_bytes, message=message, header=header)
     return ciphertext
 
 
@@ -217,7 +155,8 @@ def encrypt_for_login(message):
     global private_key
     private_key = find_private_key(_username, password)
     if not private_key:
-        print("there is not such a user with this password!")
+        raise Exception("there is not such a user with this password!")
+        # print("there is not such a user with this password!")
     return encrypted_message
 
 
@@ -233,7 +172,10 @@ def clear_data():
 
 def encrypt_for_logout():
     global username
-    encrypted_message = encrypt_with_master_key(master_key, "", "LOGOUT||" + username)
+    if not username or str(username) == "":
+        raise Exception("You must login first.")
+    _username = str(username)
+    encrypted_message = encrypt_data(key=master_key, data="", header="LOGOUT||" + _username)
     clear_data()
     return encrypted_message
 
@@ -242,11 +184,9 @@ def encrypt_for_public_key(user_des: str):
     # PUBLIC||USERNAME||E(USER_DES)
     global username
     if not username:
-        print("You must login first.")
-        return
+        raise Exception("You must login first.")
     if not user_des:
-        print("recipient can not be empty.")
-        return
+        raise Exception("recipient can not be empty")
     _username = str(username)
     header = "PUBLIC||" + _username
     message = user_des
@@ -254,67 +194,26 @@ def encrypt_for_public_key(user_des: str):
     return encrypted_message
 
 
-# AES encryption key (must be 16, 24, or 32 bytes long)
-KEY = b'mysecretpassword'
-
-
-# function to encrypt data
-def encrypt(data):
-    cipher = AES.new(KEY, AES.MODE_EAX)
-    nonce = cipher.nonce
-    ciphertext, tag = cipher.encrypt_and_digest(data.encode())
-    return nonce + ciphertext + tag
-
-
-# function to decrypt data
-def decrypt(data):
-    nonce = data[:AES.block_size]
-    ciphertext = data[AES.block_size:-AES.block_size]
-    tag = data[-AES.block_size:]
-    cipher = AES.new(KEY, AES.MODE_EAX, nonce)
-    plaintext = cipher.decrypt(ciphertext)
-    try:
-        cipher.verify(tag)
-    except ValueError:
-        raise ValueError("Key incorrect or message corrupted")
-    return plaintext.decode()
-
-
 def handle_signup(data_main):
-    decrypted_response = private_key.decrypt(
-        data_main,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
-    )
-    decrypted_message = decrypted_response.decode()
-    decrypted_message_parts = decrypted_message.split("||")
-    if decrypted_message_parts[0] == nonce:
-        print(decrypted_message_parts[1])
-
+    utils.decode_with_private_key(ciphertext=data_main, private_key=private_key)
     save_private_key(private_key_bytes)
     save_public_key(public_key_bytes)
+    # decrypted_response = utils.decode_with_private_key(ciphertext=data_main, private_key=private_key)
+    # decrypted_message_parts = decrypted_response.split("||")
+    # if decrypted_message_parts[0] == nonce:
+    #     print(decrypted_message_parts[1])
+    # save_private_key(private_key_bytes)
+    # save_public_key(public_key_bytes)
 
 
 def handle_login(data_main):
-    decrypted_response = private_key.decrypt(
-        data_main,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
-    )
-    decrypted_message = decrypted_response.decode()
+    decrypted_message = utils.decode_with_private_key(ciphertext=data_main, private_key=private_key)
     decrypted_message_parts = decrypted_message.split("||")
     global master_key
     master_key = decrypted_message_parts[1]
     _username = decrypted_message_parts[2]
     global username
     username = _username
-    print(master_key)
     print("successfully login")
     global isLogin
     isLogin = True
@@ -322,17 +221,14 @@ def handle_login(data_main):
 
 def handle_public(data_header, data_main, server_socket):
     # FORWARD||USERNAME||DEST_USERNAME(E(REQUEST_SESSION||USERNAME||E(diffie_public))
-    # TODO check timestamps
-    decrypted_data = decrypt_data(master_key, data_main)
+    decrypted_data = decrypt_data(key=master_key, encrypted_data=data_main)
     _dest_user = decrypted_data.split("||")[1]
-    if not dest_user:
-        print("destination user not found ")
-        return
+    if not dest_user or _dest_user == "":
+        raise Exception("destination user not found ")
     data_header_parts = data_header.split()
     global username, diffie_private_key, diffie_public_key
-    if not username:
-        print("you must login first.")
-        return
+    if not username or str(username) == "":
+        raise Exception("you must login first.")
     _username = str(username)
     dest_user_public_key_bytes = data_header_parts[1]
     dest_user_public_key = serialization.load_pem_public_key(
@@ -341,10 +237,12 @@ def handle_public(data_header, data_main, server_socket):
     )
     diffie_private_key = diffie_generate_private_key()
     diffie_public_key = diffie_generate_public_key(diffie_private_key)
+    # encrypted message for user
     header = "REQUEST_SESSION||" + _username
     encrypted_message = encode_with_public_key(dest_user_public_key, str(diffie_public_key).encode(), header)
+    # encrypted message for server
     header = "FORWARD||" + _username + "||" + _dest_user
-    super_encrypted_message = encrypt_with_master_key(master_key, encrypted_message, header)
+    super_encrypted_message = encrypt_data(key=master_key, data=encrypted_message, header=header)
     server_socket.send(super_encrypted_message)
 
 
@@ -352,8 +250,7 @@ def handle_send_private(server_socket, message):
     messages_part = message.split()
     _dest_user = messages_part[1]
     if not _dest_user:
-        print("dest user is not define.")
-        return
+        raise Exception("dest user is not define.")
     global dest_user
     dest_user = _dest_user
     dest_user_session = session_keys.get(_dest_user)
@@ -365,55 +262,63 @@ def handle_send_private(server_socket, message):
 # function to receive data from server
 def receive_data(server_socket):
     while True:
-        data = server_socket.recv(1024)
-        if len(data) < 500:
-            print(data.decode())
-        else:
-            data_header, data_main = dataSplit(data)
+        try:
+            data = server_socket.recv(1024)
+            if len(data) < 500:
+                print(data.decode())
+            else:
+                data_header, data_main = dataSplit(data)
 
-            if data_header.startswith("SIGNUP"):
-                handle_signup(data_main)
+                if data_header.startswith("SIGNUP"):
+                    handle_signup(data_main)
 
-            if data_header.startswith("LOGIN"):
-                handle_login(data_main)
+                if data_header.startswith("LOGIN"):
+                    handle_login(data_main)
 
-            if data_header.startswith("PUBLIC"):
-                handle_public(data_header, data_main, server_socket)
+                if data_header.startswith("PUBLIC"):
+                    handle_public(data_header, data_main, server_socket)
+        except Exception as e:
+            print(e)
+            traceback.print_exc()
 
 
 # function to send data to server
 def send_data(server_socket):
     while True:
         # get user input
-        message = input()
-        if message.startswith("SIGNUP"):
-
-            message = encrypt_for_signup(message)
-            server_socket.send(message)
-        elif message.startswith("LOGIN"):
+        try:
             global isLogin
-            if isLogin:
-                print("You have already Logged in!")
-            else:
-                message_parts = message.split()
-                global username
-                username = message_parts[1]
-                message = encrypt_for_login(message)
-                server_socket.send(message)
-        elif message.startswith("LOGOUT"):
-            if isLogin is False:
-                print("You should Login first!")
-            else:
-                message = encrypt_for_logout()
-                server_socket.send(message)
-                isLogin = False
-                print("User Logged out successfully")
-        elif message.startswith("PRIVATE"):
-            handle_send_private(server_socket, message)
+            message = input()
+            if message.startswith("SIGNUP"):
 
-        # server_socket.send(message)
-        else:
-            print("Invalid command.")
+                message = encrypt_for_signup(message)
+                server_socket.send(message)
+            elif message.startswith("LOGIN"):
+                if isLogin:
+                    print("You have already Logged in!")
+                else:
+                    message_parts = message.split()
+                    global username
+                    username = message_parts[1]
+                    message = encrypt_for_login(message)
+                    server_socket.send(message)
+            elif message.startswith("LOGOUT"):
+                if isLogin is False:
+                    print("You should Login first!")
+                else:
+                    message = encrypt_for_logout()
+                    server_socket.send(message)
+                    isLogin = False
+                    print("User Logged out successfully")
+            elif message.startswith("PRIVATE"):
+                handle_send_private(server_socket, message)
+
+            # server_socket.send(message)
+            else:
+                print("Invalid command.")
+        except Exception as e:
+            print(e)
+            traceback.print_exc()
 
 
 # function to connect to server

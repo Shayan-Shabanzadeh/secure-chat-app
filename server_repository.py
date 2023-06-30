@@ -30,6 +30,7 @@ class User(Base):
     is_online = Column(Boolean, nullable=False)
     master_key = Column(String)
 
+
 def add_user(username, password, public_key, is_online):
     session = Session()
     try:
@@ -99,6 +100,4 @@ def set_master_key(username, master_key):
     finally:
         session.close()
 
-
 # Define the User entity
-
