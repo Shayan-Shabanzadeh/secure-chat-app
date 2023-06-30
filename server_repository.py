@@ -20,6 +20,16 @@ def initialize_database():
     return Session()
 
 
+class User(Base):
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String, unique=True, nullable=False)
+    password = Column(String, unique=True, nullable=False)
+    public_key = Column(String, nullable=False)
+    is_online = Column(Boolean, nullable=False)
+    master_key = Column(String)
+
 def add_user(username, password, public_key, is_online):
     session = Session()
     try:
@@ -61,7 +71,7 @@ def find_all_online_users():
     return [user.username for user in online_users]
 
 
-def find_user_by_username(username):
+def find_user_by_username(username) -> User | None:
     session = Session()
     try:
         user = session.query(User).filter_by(username=username).one()
@@ -91,12 +101,4 @@ def set_master_key(username, master_key):
 
 
 # Define the User entity
-class User(Base):
-    __tablename__ = 'users'
 
-    id = Column(Integer, primary_key=True)
-    username = Column(String, unique=True, nullable=False)
-    password = Column(String, unique=True, nullable=False)
-    public_key = Column(String, nullable=False)
-    is_online = Column(Boolean, nullable=False)
-    master_key = Column(String)

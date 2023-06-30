@@ -1,28 +1,33 @@
-import os
-import secrets
 import time
 import random
+import time
+
 import cryptography
+from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization, asymmetric, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.fernet import Fernet
+
 header_size = 500
 time_stamps_threshold = 5
 # Prime number and primitive root (shared public values)
 p = 15790321  # A large prime number
 g = 5  # A small primitive root modulo p
 
+
 def diffie_generate_private_key():
     # Generates a random private key
     return random.randint(1, p - 1)
+
 
 def diffie_generate_public_key(private_key):
     # Computes the public key corresponding to the given private key
     return pow(g, private_key, p)
 
+
 def diffie_generate_session_key(private_key, received_public_key):
     # Computes the session key using the received public key and the private key
     return pow(received_public_key, private_key, p)
+
 
 def encode_with_public_key(public_key, message, header):
     public_key = serialization.load_pem_public_key(public_key)
@@ -47,7 +52,7 @@ def encode_with_public_key(public_key, message, header):
         # Encryption failed
         print("Encryption failed:", str(e))
     header_bytes = bytes(header, 'utf-8')
-    header = header_bytes  + b"||"
+    header = header_bytes + b"||"
     padded_header = header.ljust(header_size, b'\x00')
     ciphertext = padded_header + ciphertext
     return ciphertext
@@ -129,20 +134,18 @@ def extract_expire_time(session_key):
     # Return the expiration datetime
     return expiration_datetime
 
-def encrypt_with_master_key(master_key,message,header):
 
+def encrypt_with_master_key(master_key, message, header):
     timestamp = int(time.time())
     # Append client public key, nonce, and message
     data = str(timestamp) + "||" + message
     data = data.encode()
-    ciphertext = encrypt_data(master_key,message)
+    ciphertext = encrypt_data(master_key, message)
     header_bytes = bytes(header, 'utf-8')
-    header = header_bytes  + b"||"
+    header = header_bytes + b"||"
     padded_header = header.ljust(header_size, b'\x00')
     ciphertext = padded_header + ciphertext
     return ciphertext
-
-
 
 
 def encrypt_data(key, data):
@@ -158,8 +161,8 @@ def encrypt_data(key, data):
     # Return the encrypted data
     return encrypted_data
 
+
 def decrypt_data(key, encrypted_data):
-   
     # Create a Fernet cipher object with the key
     cipher = Fernet(key)
 
@@ -171,6 +174,7 @@ def decrypt_data(key, encrypted_data):
 
     # Return the decrypted data
     return data
+
 
 def make_header(header):
     padded_header = header.ljust(header_size, b'\x00')

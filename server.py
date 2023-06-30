@@ -1,4 +1,3 @@
-from utils import *
 import socket
 import threading
 from collections import defaultdict
@@ -6,10 +5,9 @@ from collections import defaultdict
 import bcrypt
 from Cryptodome.Cipher import AES
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization, hashes
-from cryptography.hazmat.primitives.asymmetric import padding
 
 import server_repository
+from utils import *
 
 header_size = 500
 # Load the private key from the file
@@ -100,7 +98,7 @@ def handle_client(client_socket, client_address):
         # receive data from the client
         try:
             data = client_socket.recv(1024)
-            if(len(data) >= 500):
+            if len(data) >= 500:
                 data_header = data[:header_size].decode()
                 data_main = data[header_size:]
             else:
@@ -118,17 +116,17 @@ def handle_client(client_socket, client_address):
 
         # handle login
         elif data_header.upper().startswith("LOGOUT"):
-            _username = handle_logout(client_socket, data_header,data_main)
+            _username = handle_logout(client_socket, data_header, data_main)
 
         # handle signup
         elif data_header.upper().startswith("SIGNUP"):
             _username = handle_signup(client_socket, data_header, data_main)
 
-        #handle public_key request
+        # handle public_key request
         elif data_header.upper().startswith("PUBLIC"):
             _username = handle_public(client_socket, data_header, data_main)
 
-       
+
 
         # handle group chat
         elif data_header.startswith("GROUP"):
@@ -139,7 +137,7 @@ def handle_client(client_socket, client_address):
             handle_private(client_socket, data)
 
         elif data_header.startswith("FORWARD"):
-            handle_forward(client_socket,data_header,data_main)
+            handle_forward(client_socket, data_header, data_main)
         # handle create group
         elif data_header.startswith("CREATE_GROUP"):
             handle_create_group(client_socket, data)
@@ -171,7 +169,6 @@ def handle_client(client_socket, client_address):
             client_socket.send("Error: Invalid command".encode())
 
     print(f"Client disconnected: {client_address}")
-
 
 
 def handle_list_memebers(client_socket, data):
@@ -266,7 +263,7 @@ def handle_signup(client_socket, data_header, data_main):
         salt = bcrypt.gensalt()
         password = bcrypt.hashpw(password.encode(), salt)
         server_repository.add_user(username=username, password=password, public_key=serialized_public_key,
-                                        is_online=False)
+                                   is_online=False)
         msg = "successfully signed up"
         response_message = nonce + "||" + msg
         response_message = response_message.encode()
@@ -291,54 +288,61 @@ def handle_login(client_socket, data_main):
     time_stamps, message = decrypt_first_message(data_main, server_private_key)
     _, username, password = message.split()
     user = server_repository.find_user_by_username(username=username)
-    if(user == None):
+    if user is None:
         client_socket.send("Error: Invalid username or password".encode())
     elif not bcrypt.checkpw(password.encode(), user.password):
         client_socket.send("Error: Invalid username or password".encode())
     else:
-        server_repository.change_user_status(username,True)
+        server_repository.change_user_status(username, True)
         clients[user.username] = client_socket
         master_key = generate_session_key()
-        server_repository.set_master_key(username,master_key)
-        message = master_key.decode()
+        server_repository.set_master_key(username, master_key)
+        message = master_key.decode() + "||" + user.username
         public_key = user.public_key
-        encrypted_message = encode_with_public_key(public_key,message,"LOGIN")
+        encrypted_message = encode_with_public_key(public_key, message, "LOGIN")
         client_socket.send(encrypted_message)
     return username
+
 
 def handle_logout(client_socket, data_header, data_main):
     data_header_parts = data_header.split("||")
     user = server_repository.find_user_by_username(data_header_parts[1])
-    decrypted_data = decrypt_data(user.master_key,data_main)
+    decrypted_data = decrypt_data(user.master_key, data_main)
     decrypted_data_parts = decrypted_data.split("||")
-    server_repository.change_user_status(user.username,False) 
+    server_repository.change_user_status(user.username, False)
     return user.username
 
-def handle_public(client_socket,data_header, data_main):
+
+def handle_public(client_socket, data_header, data_main):
     data_header_parts = data_header.split("||")
 
     user1 = server_repository.find_user_by_username(data_header_parts[1])
-    if(user1 == None or user1.is_online == False):
+    if user1 is None or user1.is_online is False:
         client_socket.send("You should Login first!".encode())
-    user2 = server_repository.find_user_by_username(data_header_parts[2])
-    if(user2 == None or user2.is_online == False):
+    user_des = decrypt_data(user1.master_key, data_main)
+    if not user_des:
+        client_socket.send("user destination can not be empty.")
+
+    user2 = server_repository.find_user_by_username(user_des)
+    if user2 is None or user2.is_online is False:
         client_socket.send("this user is not online!".encode())
-    decrypted_data = decrypt_data(user1.master_key,data_main)
-    decrypted_data_parts = decrypted_data.split("||")
+
     header = "PUBLIC||" + user2.public_key
-    encrypted_message = encrypt_with_master_key(user1.master_key,"",header)
+    encrypted_message = encrypt_with_master_key(user1.master_key, user2.username, header)
     client_socket.send(encrypted_message)
 
-def handle_forward(client_socket,data_header,data_main):
+
+def handle_forward(client_socket, data_header, data_main):
     data_header_parts = data_header.split("||")
     from_user = server_repository.find_user_by_username(data_header_parts[1])
     dest_user = server_repository.find_user_by_username(data_header_parts[2])
-    if(from_user == None or dest_user == None):
+    if from_user is None or dest_user is None:
         client_socket.send("something is wrong!".encode())
     dest_user_socket = clients.get(dest_user)
-    message = decrypt_data(from_user.master_key,data_main)
-    encrypted_message = encrypt_with_master_key(dest_user.master_key,message,"FORWARD")
+    message = decrypt_data(from_user.master_key, data_main)
+    encrypted_message = encrypt_with_master_key(dest_user.master_key, message, "FORWARD")
     dest_user_socket.send(encrypted_message)
+
 
 # function to start server
 def start_server():
@@ -346,7 +350,7 @@ def start_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     # bind socket to address and port
-    server_address = ("localhost", 8000)
+    server_address = ("localhost", 9000)
     server_socket.bind(server_address)
 
     # listen for incoming connections
