@@ -256,7 +256,7 @@ def handle_login(client_socket, data_main):
     else:
         server_repository.change_user_status(username, True)
         clients[user.username] = client_socket
-        master_key = generate_master_key()
+        master_key = generate_session_key()
         server_repository.set_master_key(username, master_key)
         message = master_key.decode() + "||" + user.username
         public_key = user.public_key

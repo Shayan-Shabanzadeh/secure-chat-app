@@ -30,7 +30,7 @@ def diffie_generate_session_key(private_key, received_public_key):
     return pow(received_public_key, private_key, p)
 
 
-def generate_master_key(expiration_time=3600):
+def generate_session_key(expiration_time=3600):
     # Generate a random session key using secrets module
     key = Fernet.generate_key()
 

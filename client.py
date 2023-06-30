@@ -258,18 +258,19 @@ def handle_send_private(server_socket, message):
         server_socket.send(message)
 
 
-def handle_forward(data_header,data_main,server_socket):
-    data_main = decrypt_data(master_key,data_main)
-    data_main_main , data_main_header = data_main.aplit()
-    if(data_main_header.startswith("REQUEST_SESSION")):
-        handle_create_session(data_main_header,data_main_main,server_socket)
+def handle_forward(data_header, data_main, server_socket):
+    data_main = decrypt_data(master_key, data_main)
+    data_main_main, data_main_header = data_main.aplit()
+    if (data_main_header.startswith("REQUEST_SESSION")):
+        handle_create_session(data_main_header, data_main_main, server_socket)
         encrypted_message = encrypt_for_public_key(data_main_header.split()[1])
         server_socket.send(encrypted_message)
 
-def handle_create_session(data_header,data_main,server_socket):
+
+def handle_create_session(data_header, data_main, server_socket):
     data_header_parts = data_header.split("||")
     from_user = data_header_parts[1]
-    data_main = decode_with_private_key(private_key,data_main).decode()
+    data_main = decode_with_private_key(private_key, data_main).decode()
     diffie_public_key_other = int(data_main)
     global diffie_private_key, diffie_public_key
     diffie_private_key = diffie_generate_private_key()
@@ -277,8 +278,7 @@ def handle_create_session(data_header,data_main,server_socket):
     session_key = generate_session_key(diffie_private_key, diffie_public_key_other)
     session_keys[from_user] = session_key
 
-    
-    
+
 # function to receive data from server
 def receive_data(server_socket):
     while True:
@@ -300,8 +300,6 @@ def receive_data(server_socket):
         except Exception as e:
             print(e)
             traceback.print_exc()
-
-
 
 
 # function to send data to server
