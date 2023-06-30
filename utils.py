@@ -1,13 +1,29 @@
 import os
 import secrets
 import time
-
+import random
 import cryptography
 from cryptography.hazmat.primitives import serialization, asymmetric, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.fernet import Fernet
 header_size = 500
 time_stamps_threshold = 5
+# Prime number and primitive root (shared public values)
+p = 15790321  # A large prime number
+g = 5  # A small primitive root modulo p
+
+def diffie_generate_private_key():
+    # Generates a random private key
+    return random.randint(1, p - 1)
+
+def diffie_generate_public_key(private_key):
+    # Computes the public key corresponding to the given private key
+    return pow(g, private_key, p)
+
+def diffie_generate_session_key(private_key, received_public_key):
+    # Computes the session key using the received public key and the private key
+    return pow(received_public_key, private_key, p)
+
 def encode_with_public_key(public_key, message, header):
     public_key = serialization.load_pem_public_key(public_key)
 
