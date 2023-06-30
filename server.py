@@ -9,8 +9,26 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 
 import server_repository
+import utils
 
 header_size = 500
+
+# AES encryption key (must be 16, 24, or 32 bytes long)
+# MASTER_KEY_PLAIN = b'mysecretpassword'
+# MASTER_KEY = hashlib.sha256(MASTER_KEY_PLAIN).digest()
+MASTER_KEY, MASTER_KEY_EXPIRE_TIME = utils.generate_key_with_expire_time("123", 1)
+
+# dictionary to store username and password hash
+users = {}
+
+# dictionary to store connected clients and their sockets
+clients = {}
+
+# dictionary to store group chats and their members
+groups = defaultdict(set)
+
+# dictionary to store private chats and their members
+privates = {}
 # Load the private key from the file
 with open("server_private_key.pem", "rb") as file:
     server_private_key_bytes = file.read()
@@ -51,25 +69,9 @@ def decrypt_first_message(ciphertext, private_key):
     return nonce, message
 
 
-# AES encryption key (must be 16, 24, or 32 bytes long)
-KEY = b'mysecretpassword'
-
-# dictionary to store username and password hash
-users = {}
-
-# dictionary to store connected clients and their sockets
-clients = {}
-
-# dictionary to store group chats and their members
-groups = defaultdict(set)
-
-# dictionary to store private chats and their members
-privates = {}
-
-
 # function to encrypt data
 def encrypt(data):
-    cipher = AES.new(KEY, AES.MODE_EAX)
+    cipher = AES.new(MASTER_KEY, AES.MODE_EAX)
     nonce = cipher.nonce
     ciphertext, tag = cipher.encrypt_and_digest(data.encode())
     return nonce + ciphertext + tag
@@ -80,7 +82,7 @@ def decrypt(data):
     nonce = data[:AES.block_size]
     ciphertext = data[AES.block_size:-AES.block_size]
     tag = data[-AES.block_size:]
-    cipher = AES.new(KEY, AES.MODE_EAX, nonce)
+    cipher = AES.new(MASTER_KEY, AES.MODE_EAX, nonce)
     plaintext = cipher.decrypt(ciphertext)
     try:
         cipher.verify(tag)
@@ -93,7 +95,7 @@ def decrypt(data):
 def handle_client(client_socket, client_address):
     # send welcome message
     client_socket.send("Welcome to the chat app!".encode())
-    _username = ""
+    _username = "shayan"
 
     while True:
         # receive data from the client
@@ -106,8 +108,6 @@ def handle_client(client_socket, client_address):
             client_socket.send("Error: Key incorrect or message corrupted".encode())
             continue
 
-        print(data_header.upper())
-
         # handle login
         if data_header.upper().startswith("LOGIN"):
             _username = handle_login(client_socket, data)
@@ -115,6 +115,9 @@ def handle_client(client_socket, client_address):
         # handle signup
         elif data_header.upper().startswith("SIGNUP"):
             _username = handle_signup(client_socket, data_header, data_main)
+
+        elif data_header.upper().startswith("FIND"):
+            handle_find_user(client_socket, data_header, data_main)
 
         # handle group chat
         elif data_header.startswith("GROUP"):
@@ -151,11 +154,9 @@ def handle_client(client_socket, client_address):
 
         # handle invalid command
         else:
-            print("command is : " + data_header)
             client_socket.send("Error: Invalid command".encode())
 
     print(f"Client disconnected: {client_address}")
-
 
 
 def handle_list_memebers(client_socket, data):
@@ -231,6 +232,35 @@ def handle_group(client_socket, data, username):
                 recipient_socket.send(f"{username}: {message}")
 
 
+def handle_find_user(client_socket, data_header, data_main):
+    data_header_parts = data_header.split("||")
+    username = data_header_parts[1]
+    user = server_repository.find_user_by_username(username=username)
+    # TODO don't forget to use this master key instead.
+    # user_master_key = user.master_key
+    msg = ""
+    if not user.is_online:
+        msg = "You are not login."
+    else:
+        # TODO uncomment this lines
+        # user_master_key = user.master_key
+        # data = utils.decrypt_data(user_master_key , data_main)
+        # TODO comment this line
+        data = utils.decrypt_data(MASTER_KEY, data_main)
+        recipient_username = data.split("||")[1]
+        recipient = server_repository.find_user_by_username(recipient_username)
+        if not recipient:
+            msg = "recipient user does not exist."
+        else:
+            msg = "FIND||" + recipient_username + "||" + recipient.public_key
+    header = b"FIND||"
+    padded_header = header.ljust(header_size, b'\x00')
+    encrypted_message = utils.encrypt_data(key=MASTER_KEY, data=msg)
+    encrypted_message = padded_header + encrypted_message
+    print(encrypted_message)
+    client_socket.send(encrypted_message)
+
+
 def handle_signup(client_socket, data_header, data_main):
     data_header_parts = data_header.split("||")
     serialized_public_key = data_header_parts[1].encode()
@@ -293,7 +323,7 @@ def start_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     # bind socket to address and port
-    server_address = ("localhost", 8000)
+    server_address = ("localhost", 9090)
     server_socket.bind(server_address)
 
     # listen for incoming connections

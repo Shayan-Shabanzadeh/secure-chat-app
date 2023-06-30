@@ -1,10 +1,12 @@
+import base64
 import os
-import secrets
 import time
+from datetime import datetime, timedelta
 
 import cryptography
-from cryptography.hazmat.primitives import serialization, asymmetric, hashes
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import serialization, asymmetric, hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
 def encode_with_public_key(public_key, message):
@@ -88,26 +90,22 @@ def decode_with_private_key(private_key, ciphertext):
     return extracted_nonce, extracted_timestamp, extracted_message
 
 
-def generate_session_key(expiration_time=3600):
-    # Generate a random session key using secrets module
-    session_key = secrets.token_hex(16)
+def generate_key_with_expire_time(password, expire_time_hours, salt=b'somesalt'):
+    # Derive a 32-byte key using PBKDF2 with a given password and salt
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
 
-    # Calculate the expiration timestamp
-    expiration_timestamp = time.time() + expiration_time
+    # Calculate the expiration time
+    current_time = datetime.utcnow()
+    expire_time = current_time + timedelta(hours=expire_time_hours)
 
-    # Return the session key and expiration timestamp as a tuple
-    return session_key, expiration_timestamp
+    return key, expire_time.strftime('%Y-%m-%d %H:%M:%S').encode()
 
-
-def extract_expire_time(session_key):
-    # Extract the expiration timestamp from the session key
-    expiration_timestamp = int(session_key[-10:], 16)
-
-    # Convert the expiration timestamp to a datetime object
-    expiration_datetime = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(expiration_timestamp))
-
-    # Return the expiration datetime
-    return expiration_datetime
 
 def encrypt_data(key, data):
     # Create a Fernet cipher object with the key
@@ -121,6 +119,7 @@ def encrypt_data(key, data):
 
     # Return the encrypted data
     return encrypted_data
+
 
 def decrypt_data(key, encrypted_data):
     # Create a Fernet cipher object with the key

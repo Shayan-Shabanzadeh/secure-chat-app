@@ -2,18 +2,22 @@ import os
 import random
 import socket
 import threading
-import client_repository
-from Cryptodome.Cipher import AES
+
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.fernet import Fernet
 
+import client_repository
+import utils
 
 signup_pattern = r"SIGNUP (\S+) (\S+)"
 nonce = ""
 header_size = 500
+_username = "shayan"
+is_login = False
+# MASTER_KEY = b'mysecretpassword'
+MASTER_KEY, MASTER_KEY_EXPIRE_TIME = utils.generate_key_with_expire_time("123", 1)
 
 
 def dataSplit(data):
@@ -78,7 +82,6 @@ server_public_key = serialization.load_pem_public_key(
 # Check if keys already exist
 private_key_file = "private_key.pem"
 public_key_file = "public_key.pem"
-
 
 if os.path.isfile(private_key_file) and os.path.isfile(public_key_file):
     password = input("Enter password for the existing private key: ")
@@ -154,34 +157,6 @@ def encrypt_for_signup(message):
     return ciphertext
 
 
-# AES encryption key (must be 16, 24, or 32 bytes long)
-KEY = b'mysecretpassword'
-
-
-
-
-# function to encrypt data
-def encrypt(data):
-    cipher = AES.new(KEY, AES.MODE_EAX)
-    nonce = cipher.nonce
-    ciphertext, tag = cipher.encrypt_and_digest(data.encode())
-    return nonce + ciphertext + tag
-
-
-# function to decrypt data
-def decrypt(data):
-    nonce = data[:AES.block_size]
-    ciphertext = data[AES.block_size:-AES.block_size]
-    tag = data[-AES.block_size:]
-    cipher = AES.new(KEY, AES.MODE_EAX, nonce)
-    plaintext = cipher.decrypt(ciphertext)
-    try:
-        cipher.verify(tag)
-    except ValueError:
-        raise ValueError("Key incorrect or message corrupted")
-    return plaintext.decode()
-
-
 # function to receive data from server
 def receive_data(server_socket):
     while True:
@@ -203,6 +178,34 @@ def receive_data(server_socket):
             if decrypted_message_parts[0] == nonce:
                 print(decrypted_message_parts[1])
 
+        elif data_header.startswith("FIND"):
+            data = utils.decrypt_data(MASTER_KEY, data_main)
+            recipient_username = data.split("||")[1]
+            recipient_public_key = data.split("||")[2]
+            print(recipient_username)
+            print(recipient_public_key)
+            # client_repository.add_session_key()
+
+
+def find_recipient(server_socket, recipient):
+    message = "FIND||" + recipient
+    encrypted_message = utils.encrypt_data(key=MASTER_KEY, data=message)
+    header = b"FIND||" + _username.encode() + b"||"
+    padded_header = header.ljust(header_size, b'\x00')
+    encrypted_message = padded_header + encrypted_message
+    server_socket.send(encrypted_message)
+
+
+def handle_private(server_socket, recipient):
+    # TODO check if recipient exist or not
+    find_recipient(server_socket, recipient)
+    # TODO check if recipient session key exist and is valid
+    # TODO get recipient public key if its needed.
+    # TODO send session key to recipient
+    # TODO encryptMessage with session key
+    # TODO encrypt Message with master key
+    return
+
 
 # function to send data to server
 def send_data(server_socket):
@@ -212,14 +215,12 @@ def send_data(server_socket):
         if message.startswith("SIGNUP"):
             message = encrypt_for_signup(message)
             server_socket.send(message)
+        elif message.startswith("PRIVATE"):
+            recipient, message = message.split(maxsplit=2)
+            # TODO check if recipient is not null or empty
+            handle_private(server_socket=server_socket, recipient=recipient)
         else:
             print("Invalid command.")
-        # match = re.match(signup_pattern, message)
-        # if match:
-        #     message = encrypt_first_message(message)
-        #     print(message)
-        # send data to server
-        # server_socket.send(message)
 
 
 # function to connect to server
@@ -228,7 +229,7 @@ def connect_to_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     # connect to server
-    server_address = ("localhost", 8000)
+    server_address = ("localhost", 9090)
     server_socket.connect(server_address)
 
     # start thread to receive data from server
