@@ -1,3 +1,4 @@
+from utils import *
 import socket
 import threading
 from collections import defaultdict
@@ -99,8 +100,11 @@ def handle_client(client_socket, client_address):
         # receive data from the client
         try:
             data = client_socket.recv(1024)
-            data_header = data[:header_size].decode()
-            data_main = data[header_size:]
+            if(len(data) >= 500):
+                data_header = data[:header_size].decode()
+                data_main = data[header_size:]
+            else:
+                data_header = data.decode()
         except ValueError:
             print("Error")
             client_socket.send("Error: Key incorrect or message corrupted".encode())
@@ -110,11 +114,21 @@ def handle_client(client_socket, client_address):
 
         # handle login
         if data_header.upper().startswith("LOGIN"):
-            _username = handle_login(client_socket, data)
+            _username = handle_login(client_socket, data_main)
+
+        # handle login
+        elif data_header.upper().startswith("LOGOUT"):
+            _username = handle_logout(client_socket, data_header,data_main)
 
         # handle signup
         elif data_header.upper().startswith("SIGNUP"):
             _username = handle_signup(client_socket, data_header, data_main)
+
+        #handle public_key request
+        elif data_header.upper().startswith("PUBLIC"):
+            _username = handle_public(client_socket, data_header, data_main)
+
+       
 
         # handle group chat
         elif data_header.startswith("GROUP"):
@@ -124,6 +138,8 @@ def handle_client(client_socket, client_address):
         elif data_header.startswith("PRIVATE"):
             handle_private(client_socket, data)
 
+        elif data_header.startswith("FORWARD"):
+            handle_forward(client_socket,data_header,data_main)
         # handle create group
         elif data_header.startswith("CREATE_GROUP"):
             handle_create_group(client_socket, data)
@@ -234,7 +250,6 @@ def handle_group(client_socket, data, username):
 def handle_signup(client_socket, data_header, data_main):
     data_header_parts = data_header.split("||")
     serialized_public_key = data_header_parts[1].encode()
-    print("serialized_public_key : " + str(serialized_public_key))
     # Deserialize the public key from bytes
     public_key = serialization.load_pem_public_key(
         serialized_public_key,
@@ -246,46 +261,84 @@ def handle_signup(client_socket, data_header, data_main):
     user = server_repository.find_user_by_username(username=username)
     if user:
         msg = "Error: Username already exists"
+        client_socket.send(msg.encode())
     else:
         salt = bcrypt.gensalt()
         password = bcrypt.hashpw(password.encode(), salt)
-        try:
-            server_repository.add_user(username=username, password=password, public_key=serialized_public_key,
-                                       is_online=False)
-            msg = "signup successful."
-        except Exception as e:
-            print(e)
-            msg = "Something went wrong."
-    response_message = nonce + "||" + msg
-    response_message = response_message.encode()
-    # Encrypt the response message with the received public key
-    encrypted_response = public_key.encrypt(
-        response_message,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
+        server_repository.add_user(username=username, password=password, public_key=serialized_public_key,
+                                        is_online=False)
+        msg = "successfully signed up"
+        response_message = nonce + "||" + msg
+        response_message = response_message.encode()
+        # Encrypt the response message with the received public key
+        encrypted_response = public_key.encrypt(
+            response_message,
+            padding.OAEP(
+                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                algorithm=hashes.SHA256(),
+                label=None
+            )
         )
-    )
-    header = b"SIGNUP||"
-    # Pad the header with null bytes ('\x00') to reach the desired size
-    padded_header = header.ljust(header_size, b'\x00')
-    response_message = padded_header + encrypted_response
-    client_socket.send(response_message)
-    return username
+        header = b"SIGNUP||"
+        # Pad the header with null bytes ('\x00') to reach the desired size
+        padded_header = header.ljust(header_size, b'\x00')
+        response_message = padded_header + encrypted_response
+        client_socket.send(response_message)
+        return username
 
 
-def handle_login(client_socket, data):
-    _, username, password = data.split()
-    if username not in users:
-        client_socket.send("Error: Invalid username or password")
-    elif not bcrypt.checkpw(password.encode(), users[username]):
-        client_socket.send("Error: Invalid username or password")
+def handle_login(client_socket, data_main):
+    time_stamps, message = decrypt_first_message(data_main, server_private_key)
+    _, username, password = message.split()
+    user = server_repository.find_user_by_username(username=username)
+    if(user == None):
+        client_socket.send("Error: Invalid username or password".encode())
+    elif not bcrypt.checkpw(password.encode(), user.password):
+        client_socket.send("Error: Invalid username or password".encode())
     else:
-        clients[username] = client_socket
-        client_socket.send("Login successful")
+        server_repository.change_user_status(username,True)
+        clients[user.username] = client_socket
+        master_key = generate_session_key()
+        server_repository.set_master_key(username,master_key)
+        message = master_key.decode()
+        public_key = user.public_key
+        encrypted_message = encode_with_public_key(public_key,message,"LOGIN")
+        client_socket.send(encrypted_message)
     return username
 
+def handle_logout(client_socket, data_header, data_main):
+    data_header_parts = data_header.split("||")
+    user = server_repository.find_user_by_username(data_header_parts[1])
+    decrypted_data = decrypt_data(user.master_key,data_main)
+    decrypted_data_parts = decrypted_data.split("||")
+    server_repository.change_user_status(user.username,False) 
+    return user.username
+
+def handle_public(client_socket,data_header, data_main):
+    data_header_parts = data_header.split("||")
+
+    user1 = server_repository.find_user_by_username(data_header_parts[1])
+    if(user1 == None or user1.is_online == False):
+        client_socket.send("You should Login first!".encode())
+    user2 = server_repository.find_user_by_username(data_header_parts[2])
+    if(user2 == None or user2.is_online == False):
+        client_socket.send("this user is not online!".encode())
+    decrypted_data = decrypt_data(user1.master_key,data_main)
+    decrypted_data_parts = decrypted_data.split("||")
+    header = "PUBLIC||" + user2.public_key
+    encrypted_message = encrypt_with_master_key(user1.master_key,"",header)
+    client_socket.send(encrypted_message)
+
+def handle_forward(client_socket,data_header,data_main):
+    data_header_parts = data_header.split("||")
+    from_user = server_repository.find_user_by_username(data_header_parts[1])
+    dest_user = server_repository.find_user_by_username(data_header_parts[2])
+    if(from_user == None or dest_user == None):
+        client_socket.send("something is wrong!".encode())
+    dest_user_socket = clients.get(dest_user)
+    message = decrypt_data(from_user.master_key,data_main)
+    encrypted_message = encrypt_with_master_key(dest_user.master_key,message,"FORWARD")
+    dest_user_socket.send(encrypted_message)
 
 # function to start server
 def start_server():
