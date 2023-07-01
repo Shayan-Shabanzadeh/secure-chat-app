@@ -441,27 +441,26 @@ def handle_show_private(message):
 # function to receive data from server
 def receive_data(server_socket):
     while True:
-        try:
-            data = server_socket.recv(2048)
-            if len(data) < 500:
-                print(data.decode())
-            else:
-                data_header, data_main = dataSplit(data)
+        data = server_socket.recv(2048)
+        if len(data) < 500:
+            print(data.decode())
+        else:
+            data_header, data_main = dataSplit(data)
 
-                if data_header.startswith("SIGNUP"):
-                    handle_signup(data_main)
+            if data_header.startswith("SIGNUP"):
+                handle_signup(data_main)
 
-                if data_header.startswith("LOGIN"):
-                    handle_login(data_main)
+            if data_header.startswith("LOGIN"):
+                handle_login(data_main)
 
-                if data_header.startswith("PUBLIC"):
-                    handle_public(data_header, data_main, server_socket)
+            if data_header.startswith("PUBLIC"):
+                handle_public(data_header, data_main, server_socket)
 
-                if data_header.startswith("FORWARD"):
-                    handle_forward(data_main, server_socket)
+            if data_header.startswith("FORWARD"):
+                handle_forward(data_main, server_socket)
 
-                if data_header.startswith("ONLINE_USERS"):
-                    handle_online_users(data_main)
+            if data_header.startswith("ONLINE_USERS"):
+                handle_online_users(data_main)
 
             if data_header.startswith("ACK"):
                 handle_ack(data_main)
