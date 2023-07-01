@@ -38,6 +38,9 @@ class User(Base):
     is_online = Column(Boolean, nullable=False)
     master_key = Column(String)
 
+    # Define the many-to-many relationship with Group
+    groups = relationship('Group', secondary=group_user_association, back_populates='users')
+
 
 class Group(Base):
     __tablename__ = 'groups'
