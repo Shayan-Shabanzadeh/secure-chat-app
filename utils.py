@@ -1,7 +1,7 @@
 import time
 import random
 import time
-
+import base64
 import cryptography
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization, asymmetric, hashes
@@ -30,6 +30,8 @@ def diffie_generate_session_key(private_key, received_public_key):
 
 
 def encode_with_public_key(public_key, message, header):
+    if(type(public_key) == str):
+        public_key = public_key.encode()
     public_key = serialization.load_pem_public_key(public_key)
 
     timestamp = int(time.time())
@@ -37,20 +39,16 @@ def encode_with_public_key(public_key, message, header):
     data = str(timestamp) + "||" + message
     data = data.encode()
     # Encrypt the data with server's public key
-    try:
-        ciphertext = public_key.encrypt(
-            data,
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None
-            )
+    
+    ciphertext = public_key.encrypt(
+        data,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
         )
-        # Encryption successful
-        print("Encryption successful.")
-    except Exception as e:
-        # Encryption failed
-        print("Encryption failed:", str(e))
+    )
+
     header_bytes = bytes(header, 'utf-8')
     header = header_bytes + b"||"
     padded_header = header.ljust(header_size, b'\x00')
@@ -94,7 +92,6 @@ def verify_signature(public_key, message, signature):
 
 
 def decode_with_private_key(private_key, ciphertext):
-    private_key = serialization.load_pem_private_key(private_key.encode('utf-8'), password=None)
 
     # Decrypt the ciphertext using the private key
     plaintext = private_key.decrypt(
@@ -106,11 +103,7 @@ def decode_with_private_key(private_key, ciphertext):
         )
     )
 
-    # Extract the nonce, timestamp, and message from the plaintext
-    extracted_nonce = plaintext[:16]
-    extracted_timestamp = int.from_bytes(plaintext[16:26], 'big')
-    extracted_message = plaintext[26:].decode('utf-8')
-    return extracted_nonce, extracted_timestamp, extracted_message
+    return plaintext
 
 
 def generate_session_key(expiration_time=3600):
@@ -138,42 +131,66 @@ def extract_expire_time(session_key):
 def encrypt_with_master_key(master_key, message, header):
     timestamp = int(time.time())
     # Append client public key, nonce, and message
-    data = str(timestamp) + "||" + message
-    data = data.encode()
-    ciphertext = encrypt_data(master_key, message)
-    header_bytes = bytes(header, 'utf-8')
-    header = header_bytes + b"||"
+    if(type(message) == str):
+        message = message.encode()
+    data = str(timestamp).encode() + b"||" + message
+    ciphertext = encrypt_data(master_key, data)
+    if(type(header) == str):
+        header_bytes = bytes(header, 'utf-8')
+        header = header_bytes + b"||"
+    else:
+        header+=b"||"
     padded_header = header.ljust(header_size, b'\x00')
     ciphertext = padded_header + ciphertext
     return ciphertext
 
 
 def encrypt_data(key, data):
+    if(type(key) == int):
+        key = int_to_32_bytes(key)
+
+   
     # Create a Fernet cipher object with the key
     cipher = Fernet(key)
 
+    if(type(data) != bytes):
     # Convert the data to bytes
-    data_bytes = data.encode()
+        data = data.encode()
 
     # Encrypt the data
-    encrypted_data = cipher.encrypt(data_bytes)
+    encrypted_data = cipher.encrypt(data)
 
     # Return the encrypted data
     return encrypted_data
 
 
 def decrypt_data(key, encrypted_data):
+    if(type(key) == int):
+        key = int_to_32_bytes(key)
+
     # Create a Fernet cipher object with the key
     cipher = Fernet(key)
 
     # Decrypt the encrypted data
-    decrypted_data = cipher.decrypt(encrypted_data)
+    data = cipher.decrypt(encrypted_data)
 
-    # Convert the decrypted data to a string
-    data = decrypted_data.decode()
+    try:
+         # Convert the decrypted data to a string
+        data = data.decode()
+    except Exception as e:
+        e = e
 
     # Return the decrypted data
     return data
+
+def int_to_32_bytes(num):
+    byte_length = 32
+    num_bytes = num.to_bytes(byte_length, 'big')
+    padding_length = byte_length - len(num_bytes)
+    padded_bytes = num_bytes + bytes(padding_length)
+    base64_bytes = base64.b64encode(padded_bytes)
+    return base64_bytes
+  
 
 
 def make_header(header):

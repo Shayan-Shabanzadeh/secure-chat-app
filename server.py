@@ -97,7 +97,7 @@ def handle_client(client_socket, client_address):
     while True:
         # receive data from the client
         try:
-            data = client_socket.recv(1024)
+            data = client_socket.recv(2048)
             if len(data) >= 500:
                 data_header = data[:header_size].decode()
                 data_main = data[header_size:]
@@ -150,6 +150,8 @@ def handle_client(client_socket, client_address):
         elif data_header.startswith("LEAVE_GROUP"):
             handle_leave_group(client_socket, data, _username)
 
+        elif(data_header.startswith("ONLINE_USERS")):
+            handle_online_users(client_socket,data_header,data_main)
         # handle list groups
         # elif data_header.startswith("LIST_GROUPS"):
         #     handle_list_groups(client_socket)
@@ -315,19 +317,21 @@ def handle_logout(client_socket, data_header, data_main):
 
 def handle_public(client_socket, data_header, data_main):
     data_header_parts = data_header.split("||")
-
     user1 = server_repository.find_user_by_username(data_header_parts[1])
+    data_main_decrypted_parts = decrypt_data(user1.master_key, data_main).split("||")
     if user1 is None or user1.is_online is False:
         client_socket.send("You should Login first!".encode())
-    user_des = decrypt_data(user1.master_key, data_main)
+        return
+    user_des = data_main_decrypted_parts[1]
+
     if not user_des:
         client_socket.send("user destination can not be empty.")
-
+        return
     user2 = server_repository.find_user_by_username(user_des)
     if user2 is None or user2.is_online is False:
         client_socket.send("this user is not online!".encode())
-
-    header = "PUBLIC||" + user2.public_key
+        return
+    header = "PUBLIC||".encode() + user2.public_key
     encrypted_message = encrypt_with_master_key(user1.master_key, user2.username, header)
     client_socket.send(encrypted_message)
 
@@ -338,11 +342,22 @@ def handle_forward(client_socket, data_header, data_main):
     dest_user = server_repository.find_user_by_username(data_header_parts[2])
     if from_user is None or dest_user is None:
         client_socket.send("something is wrong!".encode())
-    dest_user_socket = clients.get(dest_user)
-    message = decrypt_data(from_user.master_key, data_main)
-    encrypted_message = encrypt_with_master_key(dest_user.master_key, message, "FORWARD")
+    dest_user_socket = clients.get(dest_user.username)
+    data_main = decrypt_data(from_user.master_key, data_main)
+    if(type(data_main) == str):
+        data_main = data_main.encode() 
+    data_main_parts = data_main.split(b"||")  
+    data_main = b"||".join(data_main_parts[1:])
+    encrypted_message = encrypt_with_master_key(dest_user.master_key.decode(), data_main , "FORWARD")
     dest_user_socket.send(encrypted_message)
 
+def handle_online_users(client_socket, data_header, data_main):
+    data_header_parts = data_header.split("||")
+    user = server_repository.find_user_by_username(data_header_parts[1])
+    online_users = server_repository.find_all_online_users()
+    online_users = "\n".join(online_users)
+    encrypted_data = encrypt_with_master_key(user.master_key,online_users,"ONLINE_USERS")
+    client_socket.send(encrypted_data)
 
 # function to start server
 def start_server():
