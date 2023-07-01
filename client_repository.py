@@ -7,7 +7,7 @@ from utils import *
 
 Base = declarative_base()
 Session = sessionmaker()
-MyKey = None
+
 
 
 def initialize_database():
@@ -71,13 +71,18 @@ def remove_session(username):
 
 
 # This method could throw exception
-def find_messages_between_users(user1, user2):
+def find_messages_between_users(user1, user2, myKey, myUser):
     session = Session()
     query = session.query(Chat).filter(
-        ((Chat.sender == user1) & (Chat.receiver == user2)) |
-        ((Chat.sender == user2) & (Chat.receiver == user1))
+
+        ((Chat.sender == user1) & (Chat.receiver == user2) & (Chat.username == myUser)) |
+        ((Chat.sender == user2) & (Chat.receiver == user1) & (Chat.username == myUser))
     )
-    messages = query.all()
+    all_messages = query.all()
+    messages = []
+    for msg in all_messages:
+        msg = decrypt_data(myKey,msg)
+        messages.append(msg)
     session.close()
     chat_part1 = []
     chat_part1_index = []
@@ -134,12 +139,12 @@ def get_last_sequence_number(sender, receiver):
         session.rollback()
         return None
 
-def add_chat_message(sender, receiver, message, sequence_number):
-    # encrypted_message = encrypt_data(MyKey, message)
+def add_chat_message(sender, receiver, message, sequence_number, myKey, username):
+    encrypted_message = encrypt_data(myKey, message)
     session = Session()
     try:
-        chat_message = Chat(sender=sender, receiver=receiver, message=message,
-                            sequence_number=sequence_number)
+        chat_message = Chat(sender=sender, receiver=receiver, message=encrypted_message,
+                            sequence_number=sequence_number, username =username)
         session.add(chat_message)
         session.commit()
         return True
@@ -171,4 +176,5 @@ class Chat(Base):
     sender = Column(String, nullable=False)
     receiver = Column(String, nullable=False)
     message = Column(String, nullable=False)
+    username = Column(String, nullable=False)
     sequence_number = Column(Integer, nullable=False)

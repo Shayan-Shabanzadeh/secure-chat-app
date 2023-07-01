@@ -24,7 +24,7 @@ dest_username = None
 dest_user_deq = None
 diffie_private_key = None
 diffie_public_key = None
-
+myKey = None
 
 def dataSplit(data):
     data_header = data[:header_size].decode()
@@ -170,7 +170,7 @@ def find_private_key(_username, password):
             password=derived_key,
             backend=default_backend()
         )
-        return _private_key
+        return _private_key, derived_key
     except (ValueError, TypeError):
         return None
 
@@ -214,8 +214,9 @@ def encrypt_for_login(message):
     encrypted_message = encode_with_public_key(server_public_key_bytes, message, "LOGIN")
     _username = message.split()[1]
     password = message.split()[2]
-    global private_key
-    private_key = find_private_key(_username, password)
+    global private_key, myKey
+    private_key, myKey  = find_private_key(_username, password)
+    myKey = base64.urlsafe_b64encode(myKey)
     if not private_key:
         print("there is not such a user with this password!")
     return encrypted_message
@@ -391,6 +392,9 @@ def handle_forward(data,server_socket):
     data_main = b"||".join(data_main_parts[1:])
     data_main_header , data_main_main = dataSplit(data_main)
     if(data_main_header.startswith("REQUEST_SESSION")):
+        global diffie_private_key, diffie_public_key
+        diffie_private_key = None
+        diffie_public_key = None
         handle_create_session(data_main_header,data_main_main,server_socket)
         encrypted_message = encrypt_for_public_key(data_main_header.split("||")[1])
         server_socket.send(encrypted_message)
@@ -417,6 +421,7 @@ def handle_create_session(data_header,data_main,server_socket):
     #else-> #respond_session_key_handle
     session_key = diffie_generate_session_key(diffie_private_key, diffie_public_key_other)
     session_keys[from_user] = session_key
+    print(session_key)
 
 def handle_receive_message(data_header,data_main,server_socket):
     from_user = data_header.split("||")[1]
@@ -426,7 +431,7 @@ def handle_receive_message(data_header,data_main,server_socket):
     message_chat = decrypted_data_main_parts[2]
     seq_number = decrypted_data_main_parts[1]
     print(from_user + ": " + message_chat)
-    client_repository.add_chat_message(from_user,username,message_chat,seq_number)
+    client_repository.add_chat_message(from_user,username,message_chat,seq_number,myKey,username)
 
 def handle_online_users(data_main):
     data_main = decrypt_data(master_key,data_main)
@@ -442,8 +447,7 @@ def handle_ack(data_main):
         send_message_done()
     if(decrypted_message_parts[1] == "ok"):
         if(dest_username != None):
-            # we have one db 
-            # client_repository.add_chat_message(username,dest_username,dest_user_message,dest_user_seq)
+            client_repository.add_chat_message(username,dest_username,dest_user_message,dest_user_seq,myKey,username)
             print("me -> " + dest_username + " : " + dest_user_message)
             send_message_done()
 
@@ -455,7 +459,7 @@ def send_message_done():
 
 def handle_show_private(message):
     to_user = message.split()[1]
-    messages = client_repository.find_messages_between_users(username,to_user)
+    messages = client_repository.find_messages_between_users(username,to_user,myKey,username)
     for msg in messages:
         print(msg)
 # function to receive data from server
@@ -484,6 +488,7 @@ def receive_data(server_socket):
 
             if data_header.startswith("ACK"):
                 handle_ack(data_main)
+            
 # function to send data to server
 def send_data(server_socket):
     while True:
@@ -520,6 +525,14 @@ def send_data(server_socket):
         # server_socket.send(message)
         elif message.startswith("SHOW_PRIVATE"):
             handle_show_private(message)
+        
+        elif message.startswith("CHANGE_SESSION"):
+            dest_user = message.split()[1]
+            del session_keys[dest_user]
+            global diffie_private_key, diffie_public_key
+            diffie_private_key = None
+            diffie_public_key = None
+            message = handle_send_private(server_socket, message)
         else:
             print("Invalid command.")
 
