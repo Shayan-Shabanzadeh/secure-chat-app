@@ -1,7 +1,8 @@
-import time
+import base64
 import random
 import time
-import base64
+from datetime import datetime, timedelta
+
 import cryptography
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization, asymmetric, hashes
@@ -29,8 +30,16 @@ def diffie_generate_session_key(private_key, received_public_key):
     return pow(received_public_key, private_key, p)
 
 
+def check_message_timestamp(timestamp: int):
+    current_timestamp = datetime.now()
+    timestamp_datetime = datetime.fromtimestamp(timestamp)
+    time_difference = current_timestamp - timestamp_datetime
+    if time_difference > timedelta(seconds=time_stamps_threshold):
+        raise Exception("Message timestamp is older than 2 seconds.")
+
+
 def encode_with_public_key(public_key, message, header):
-    if(type(public_key) == str):
+    if (type(public_key) == str):
         public_key = public_key.encode()
     public_key = serialization.load_pem_public_key(public_key)
 
@@ -39,7 +48,7 @@ def encode_with_public_key(public_key, message, header):
     data = str(timestamp) + "||" + message
     data = data.encode()
     # Encrypt the data with server's public key
-    
+
     ciphertext = public_key.encrypt(
         data,
         padding.OAEP(
@@ -92,7 +101,6 @@ def verify_signature(public_key, message, signature):
 
 
 def decode_with_private_key(private_key, ciphertext):
-
     # Decrypt the ciphertext using the private key
     plaintext = private_key.decrypt(
         ciphertext,
@@ -102,6 +110,14 @@ def decode_with_private_key(private_key, ciphertext):
             label=None
         )
     )
+
+    decrypted_data = plaintext.decode()
+    timestamp_str = decrypted_data.split("||")[0]
+    if not timestamp_str.isdigit():
+        raise ValueError("Timestamp format error")
+
+    timestamp = int(timestamp_str)
+    check_message_timestamp(timestamp)
 
     return plaintext
 
@@ -131,30 +147,29 @@ def extract_expire_time(session_key):
 def encrypt_with_master_key(master_key, message, header):
     timestamp = int(time.time())
     # Append client public key, nonce, and message
-    if(type(message) == str):
+    if (type(message) == str):
         message = message.encode()
     data = str(timestamp).encode() + b"||" + message
     ciphertext = encrypt_data(master_key, data)
-    if(type(header) == str):
+    if (type(header) == str):
         header_bytes = bytes(header, 'utf-8')
         header = header_bytes + b"||"
     else:
-        header+=b"||"
+        header += b"||"
     padded_header = header.ljust(header_size, b'\x00')
     ciphertext = padded_header + ciphertext
     return ciphertext
 
 
 def encrypt_data(key, data):
-    if(type(key) == int):
+    if (type(key) == int):
         key = int_to_32_bytes(key)
 
-   
     # Create a Fernet cipher object with the key
     cipher = Fernet(key)
 
-    if(type(data) != bytes):
-    # Convert the data to bytes
+    if (type(data) != bytes):
+        # Convert the data to bytes
         data = data.encode()
 
     # Encrypt the data
@@ -165,7 +180,7 @@ def encrypt_data(key, data):
 
 
 def decrypt_data(key, encrypted_data):
-    if(type(key) == int):
+    if (type(key) == int):
         key = int_to_32_bytes(key)
 
     # Create a Fernet cipher object with the key
@@ -175,13 +190,20 @@ def decrypt_data(key, encrypted_data):
     data = cipher.decrypt(encrypted_data)
 
     try:
-         # Convert the decrypted data to a string
+        # Convert the decrypted data to a string
         data = data.decode()
+        timestamp_str = data.split("||")[0]
+        if not timestamp_str.isdigit():
+            raise ValueError("Timestamp format error")
+
+        timestamp = int(timestamp_str)
+        check_message_timestamp(timestamp)
     except Exception as e:
         e = e
 
     # Return the decrypted data
     return data
+
 
 def int_to_32_bytes(num):
     byte_length = 32
@@ -190,7 +212,6 @@ def int_to_32_bytes(num):
     padded_bytes = num_bytes + bytes(padding_length)
     base64_bytes = base64.b64encode(padded_bytes)
     return base64_bytes
-  
 
 
 def make_header(header):

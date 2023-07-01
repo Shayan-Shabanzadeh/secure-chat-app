@@ -1,6 +1,7 @@
 import os
 import socket
 import threading
+import traceback
 
 from Cryptodome.Cipher import AES
 from cryptography.hazmat.backends import default_backend
@@ -8,6 +9,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 import client_repository
+import utils
 from utils import *
 
 nonce = ""
@@ -188,25 +190,10 @@ def encrypt_for_signup(message):
     )
     global private_key_bytes
     private_key_bytes = encrypt_private_key(private_key, password)
-    global nonce
     # Generate a random nonce
-    nonce = str(random.randint(1, 1000000))
     # Append client public key, nonce, and message
-    data = nonce + "||" + message
-    data = data.encode()
-
-    ciphertext = server_public_key.encrypt(
-        data,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
-    )
-
-    header = b"SIGNUP||" + public_key_bytes + b"||"
-    padded_header = header.ljust(header_size, b'\x00')
-    ciphertext = padded_header + ciphertext
+    header = "SIGNUP||" + public_key_bytes.decode()
+    ciphertext = utils.encode_with_public_key(public_key=server_public_key_bytes, message=message, header=header)
     return ciphertext
 
 
@@ -253,10 +240,12 @@ def encrypt_for_public_key(user_des: str):
     encrypted_message = encrypt_with_master_key(master_key, message, header)
     return encrypted_message
 
+
 def encrypt_for_signup_online_users():
-    encrypted_message = encrypt_with_master_key(master_key,"","ONLINE_USERS||" + username)
+    encrypted_message = encrypt_with_master_key(master_key, "", "ONLINE_USERS||" + username)
     return encrypted_message
-    
+
+
 # AES encryption key (must be 16, 24, or 32 bytes long)
 KEY = b'mysecretpassword'
 
@@ -284,32 +273,14 @@ def decrypt(data):
 
 
 def handle_signup(data_main):
-    decrypted_response = private_key.decrypt(
-        data_main,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
-    )
-    decrypted_message = decrypted_response.decode()
-    decrypted_message_parts = decrypted_message.split("||")
-    if decrypted_message_parts[0] == nonce:
-        print(decrypted_message_parts[1])
-
+    decrypted_response = utils.decode_with_private_key(private_key=private_key, ciphertext=data_main)
+    decrypted_response.decode()
     save_private_key(private_key_bytes)
     save_public_key(public_key_bytes)
 
 
 def handle_login(data_main):
-    decrypted_response = private_key.decrypt(
-        data_main,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
-    )
+    decrypted_response = utils.decode_with_private_key(private_key=private_key, ciphertext=data_main)
     decrypted_message = decrypted_response.decode()
     decrypted_message_parts = decrypted_message.split("||")
     global master_key
@@ -323,8 +294,6 @@ def handle_login(data_main):
 
 
 def handle_public(data_header, data_main, server_socket):
-    # FORWARD||USERNAME||DEST_USERNAME(E(REQUEST_SESSION||USERNAME||E(diffie_public))
-    # TODO check timestamps
     decrypted_data = decrypt_data(master_key, data_main)
     _dest_user = decrypted_data.split("||")[1]
     data_header_parts = data_header.split("||")
@@ -334,20 +303,19 @@ def handle_public(data_header, data_main, server_socket):
         return
     _username = str(username)
     dest_user_public_key_bytes = data_header_parts[1].encode()
-    
-    
-    #request_session_key_handle
-    if(diffie_private_key == None):
+    # request_session_key_handle
+    if (diffie_private_key == None):
         diffie_private_key = diffie_generate_private_key()
         diffie_public_key = diffie_generate_public_key(diffie_private_key)
         header = "REQUEST_SESSION||" + _username
-    #respond_session_key_handle
+    # respond_session_key_handle
     else:
         header = "RESPOND_SESSION||" + _username
     encrypted_message = encode_with_public_key(dest_user_public_key_bytes, str(diffie_public_key), header)
     header = "FORWARD||" + _username + "||" + _dest_user
     super_encrypted_message = encrypt_with_master_key(master_key, encrypted_message, header)
     server_socket.send(super_encrypted_message)
+
 
 def handle_send_private(server_socket, message):
     messages_part = message.split()
@@ -365,163 +333,182 @@ def handle_send_private(server_socket, message):
         message = encrypt_for_public_key(messages_part[1])
         server_socket.send(message)
     else:
-        encrypted_message = encrypt_for_private_message(server_socket,message_chat,_dest_user)
+        encrypted_message = encrypt_for_private_message(server_socket, message_chat, _dest_user)
         server_socket.send(encrypted_message)
 
-def encrypt_for_private_message(server_socket,message,dest_user):
-    
-    seq_number = client_repository.get_last_sequence_number(username,dest_user)
+
+def encrypt_for_private_message(server_socket, message, dest_user):
+    seq_number = client_repository.get_last_sequence_number(username, dest_user)
     header = "PRIVATE||" + username
     session_key = session_keys.get(dest_user)
     global dest_username, dest_user_seq, dest_user_message
     dest_user_message = message
     dest_username = dest_user
     dest_user_seq = seq_number
-    encrypted_message = encrypt_with_master_key(session_key,str(seq_number) + "||" + message,header)
+    encrypted_message = encrypt_with_master_key(session_key, str(seq_number) + "||" + message, header)
     header = "FORWARD||" + username + "||" + dest_user
     super_encrypted_message = encrypt_with_master_key(master_key, encrypted_message, header)
     return super_encrypted_message
 
 
-def handle_forward(data,server_socket):
-    data = decrypt_data(master_key,data)
-    if(type(data) == str):
+def handle_forward(data, server_socket):
+    data = decrypt_data(master_key, data)
+    if (type(data) == str):
         data = data.encode()
     data_main_parts = data.split(b"||")
     data_main = b"||".join(data_main_parts[1:])
-    data_main_header , data_main_main = dataSplit(data_main)
-    if(data_main_header.startswith("REQUEST_SESSION")):
-        handle_create_session(data_main_header,data_main_main,server_socket)
+    data_main_header, data_main_main = dataSplit(data_main)
+    if (data_main_header.startswith("REQUEST_SESSION")):
+        handle_create_session(data_main_header, data_main_main, server_socket)
         encrypted_message = encrypt_for_public_key(data_main_header.split("||")[1])
         server_socket.send(encrypted_message)
-    elif(data_main_header.startswith("RESPOND_SESSION")):
-        handle_create_session(data_main_header,data_main_main,server_socket)
+    elif (data_main_header.startswith("RESPOND_SESSION")):
+        handle_create_session(data_main_header, data_main_main, server_socket)
         dest_user = data_main_header.split("||")[1]
-        encrypted_message = encrypt_for_private_message(server_socket,dest_user_message,dest_user)
+        encrypted_message = encrypt_for_private_message(server_socket, dest_user_message, dest_user)
         server_socket.send(encrypted_message)
-    elif(data_main_header.startswith("PRIVATE")):
-        handle_receive_message(data_main_header,data_main_main,server_socket)
+    elif (data_main_header.startswith("PRIVATE")):
+        handle_receive_message(data_main_header, data_main_main, server_socket)
 
-def handle_create_session(data_header,data_main,server_socket):
+
+def handle_create_session(data_header, data_main, server_socket):
     data_header_parts = data_header.split("||")
     from_user = data_header_parts[1]
-    data_main = decode_with_private_key(private_key,data_main)
+    data_main = decode_with_private_key(private_key, data_main)
     data_main = data_main.decode()
     data_main_parts = data_main.split("||")
     diffie_public_key_other = int(data_main_parts[1])
     global diffie_private_key, diffie_public_key
-    #request_session_key_handle
-    if(diffie_private_key == None):
+    # request_session_key_handle
+    if (diffie_private_key == None):
         diffie_private_key = diffie_generate_private_key()
         diffie_public_key = diffie_generate_public_key(diffie_private_key)
-    #else-> #respond_session_key_handle
+    # else-> #respond_session_key_handle
     session_key = diffie_generate_session_key(diffie_private_key, diffie_public_key_other)
     session_keys[from_user] = session_key
 
-def handle_receive_message(data_header,data_main,server_socket):
+
+def handle_receive_message(data_header, data_main, server_socket):
     from_user = data_header.split("||")[1]
     session_key = session_keys.get(from_user)
-    decrypted_data_main = decrypt_data(session_key,data_main)
+    decrypted_data_main = decrypt_data(session_key, data_main)
     decrypted_data_main_parts = decrypted_data_main.split("||")
     message_chat = decrypted_data_main_parts[2]
     seq_number = decrypted_data_main_parts[1]
     print(from_user + ": " + message_chat)
-    client_repository.add_chat_message(from_user,username,message_chat,seq_number)
+    client_repository.add_chat_message(from_user, username, message_chat, seq_number)
+
 
 def handle_online_users(data_main):
-    data_main = decrypt_data(master_key,data_main)
+    data_main = decrypt_data(master_key, data_main)
     data_main_parts = data_main.split("||")
     print("online users :")
     print(data_main_parts[1])
 
+
 def handle_ack(data_main):
-    decrypted_message = decrypt_data(master_key,data_main)
+    decrypted_message = decrypt_data(master_key, data_main)
     decrypted_message_parts = decrypted_message.split("||")
-    if(decrypted_message_parts[1] == "error"):
+    if (decrypted_message_parts[1] == "error"):
         print(decrypted_message_parts[2])
         send_message_done()
-    if(decrypted_message_parts[1] == "ok"):
-        if(dest_username != None):
+    if (decrypted_message_parts[1] == "ok"):
+        if (dest_username != None):
             # we have one db 
             # client_repository.add_chat_message(username,dest_username,dest_user_message,dest_user_seq)
             print("me -> " + dest_username + " : " + dest_user_message)
             send_message_done()
 
+
 def send_message_done():
-    global dest_username,dest_user_seq,dest_user_message
+    global dest_username, dest_user_seq, dest_user_message
     dest_user_message = None
     dest_username = None
     dest_user_seq = None
 
+
 def handle_show_private(message):
     to_user = message.split()[1]
-    messages = client_repository.find_messages_between_users(username,to_user)
+    messages = client_repository.find_messages_between_users(username, to_user)
     for msg in messages:
         print(msg)
+
+
 # function to receive data from server
 def receive_data(server_socket):
     while True:
-        data = server_socket.recv(2048)
-        if len(data) < 500:
-            print(data.decode())
-        else:
-            data_header, data_main = dataSplit(data)
+        try:
+            data = server_socket.recv(2048)
+            if len(data) < 500:
+                print(data.decode())
+            else:
+                data_header, data_main = dataSplit(data)
 
-            if data_header.startswith("SIGNUP"):
-                handle_signup(data_main)
+                if data_header.startswith("SIGNUP"):
+                    handle_signup(data_main)
 
-            if data_header.startswith("LOGIN"):
-                handle_login(data_main)
+                if data_header.startswith("LOGIN"):
+                    handle_login(data_main)
 
-            if data_header.startswith("PUBLIC"):
-                handle_public(data_header, data_main, server_socket)
-             
-            if data_header.startswith("FORWARD"):
-                handle_forward(data_main, server_socket)
+                if data_header.startswith("PUBLIC"):
+                    handle_public(data_header, data_main, server_socket)
 
-            if data_header.startswith("ONLINE_USERS"):
-                handle_online_users(data_main)
+                if data_header.startswith("FORWARD"):
+                    handle_forward(data_main, server_socket)
 
-            if data_header.startswith("ACK"):
-                handle_ack(data_main)
+                if data_header.startswith("ONLINE_USERS"):
+                    handle_online_users(data_main)
+
+                if data_header.startswith("ACK"):
+                    handle_ack(data_main)
+        except Exception as e:
+            print(e)
+            traceback.print_exc()
+
+
 # function to send data to server
 def send_data(server_socket):
     while True:
-        # get user input
-        message = input()
-        if message.startswith("SIGNUP"):
+        try:
+            # get user input
+            message = input()
+            if message.startswith("SIGNUP"):
 
-            message = encrypt_for_signup(message)
-            server_socket.send(message)
-        elif message.startswith("LOGIN"):
-            global isLogin
-            if isLogin:
-                print("You have already Logged in!")
-            else:
-                message_parts = message.split()
-                global username
-                username = message_parts[1]
-                message = encrypt_for_login(message)
+                message = encrypt_for_signup(message)
                 server_socket.send(message)
-        elif message.startswith("LOGOUT"):
-            if isLogin is False:
-                print("You should Login first!")
-            else:
-                message = encrypt_for_logout()
+            elif message.startswith("LOGIN"):
+                global isLogin
+                if isLogin:
+                    print("You have already Logged in!")
+                else:
+                    message_parts = message.split()
+                    global username
+                    username = message_parts[1]
+                    message = encrypt_for_login(message)
+                    server_socket.send(message)
+            elif message.startswith("LOGOUT"):
+                if isLogin is False:
+                    print("You should Login first!")
+                else:
+                    message = encrypt_for_logout()
+                    server_socket.send(message)
+                    isLogin = False
+                    print("User Logged out successfully")
+            elif message.startswith("PRIVATE"):
+                handle_send_private(server_socket, message)
+
+            elif message.startswith("GET_ONLINE_USERS"):
+                message = encrypt_for_signup_online_users()
                 server_socket.send(message)
-                isLogin = False
-                print("User Logged out successfully")
-        elif message.startswith("PRIVATE"):
-            handle_send_private(server_socket, message)
-        
-        elif message.startswith("GET_ONLINE_USERS"):
-            message = encrypt_for_signup_online_users()
-            server_socket.send(message)
-        # server_socket.send(message)
-        elif message.startswith("SHOW_PRIVATE"):
-            handle_show_private(message)
-        else:
-            print("Invalid command.")
+            # server_socket.send(message)
+            elif message.startswith("SHOW_PRIVATE"):
+                handle_show_private(message)
+            else:
+                print("Invalid command.")
+        except Exception as e:
+            print(e)
+            traceback.print_exc()
+
 
 
 # function to connect to server
@@ -530,7 +517,7 @@ def connect_to_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     # connect to server
-    server_address = ("localhost", 9000)
+    server_address = ("localhost", 9030)
     server_socket.connect(server_address)
 
     # start thread to receive data from server
