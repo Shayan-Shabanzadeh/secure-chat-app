@@ -10,7 +10,6 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import client_repository
 from utils import *
 
-signup_pattern = r"SIGNUP (\S+) (\S+)"
 nonce = ""
 master_key = None
 isLogin = False
@@ -21,6 +20,8 @@ public_key_bytes = None
 private_key_bytes = None
 session_keys = {}
 dest_user_message = None
+dest_username = None
+dest_user_deq = None
 diffie_private_key = None
 diffie_public_key = None
 
@@ -368,10 +369,15 @@ def handle_send_private(server_socket, message):
         server_socket.send(encrypted_message)
 
 def encrypt_for_private_message(server_socket,message,dest_user):
-    header = "PRIVATE||" + username 
+    
+    seq_number = client_repository.get_last_sequence_number(username,dest_user)
+    header = "PRIVATE||" + username
     session_key = session_keys.get(dest_user)
-
-    encrypted_message = encrypt_with_master_key(session_key,message,header)
+    global dest_username, dest_user_seq, dest_user_message
+    dest_user_message = message
+    dest_username = dest_user
+    dest_user_seq = seq_number
+    encrypted_message = encrypt_with_master_key(session_key,str(seq_number) + "||" + message,header)
     header = "FORWARD||" + username + "||" + dest_user
     super_encrypted_message = encrypt_with_master_key(master_key, encrypted_message, header)
     return super_encrypted_message
@@ -417,15 +423,41 @@ def handle_receive_message(data_header,data_main,server_socket):
     session_key = session_keys.get(from_user)
     decrypted_data_main = decrypt_data(session_key,data_main)
     decrypted_data_main_parts = decrypted_data_main.split("||")
-    message_chat = decrypted_data_main_parts[1]
+    message_chat = decrypted_data_main_parts[2]
+    seq_number = decrypted_data_main_parts[1]
     print(from_user + ": " + message_chat)
+    client_repository.add_chat_message(from_user,username,message_chat,seq_number)
 
 def handle_online_users(data_main):
     data_main = decrypt_data(master_key,data_main)
     data_main_parts = data_main.split("||")
     print("online users :")
     print(data_main_parts[1])
-    
+
+def handle_ack(data_main):
+    decrypted_message = decrypt_data(master_key,data_main)
+    decrypted_message_parts = decrypted_message.split("||")
+    if(decrypted_message_parts[1] == "error"):
+        print(decrypted_message_parts[2])
+        send_message_done()
+    if(decrypted_message_parts[1] == "ok"):
+        if(dest_username != None):
+            # we have one db 
+            # client_repository.add_chat_message(username,dest_username,dest_user_message,dest_user_seq)
+            print("me -> " + dest_username + " : " + dest_user_message)
+            send_message_done()
+
+def send_message_done():
+    global dest_username,dest_user_seq,dest_user_message
+    dest_user_message = None
+    dest_username = None
+    dest_user_seq = None
+
+def handle_show_private(message):
+    to_user = message.split()[1]
+    messages = client_repository.find_messages_between_users(username,to_user)
+    for msg in messages:
+        print(msg)
 # function to receive data from server
 def receive_data(server_socket):
     while True:
@@ -450,6 +482,8 @@ def receive_data(server_socket):
             if data_header.startswith("ONLINE_USERS"):
                 handle_online_users(data_main)
 
+            if data_header.startswith("ACK"):
+                handle_ack(data_main)
 # function to send data to server
 def send_data(server_socket):
     while True:
@@ -484,6 +518,8 @@ def send_data(server_socket):
             message = encrypt_for_signup_online_users()
             server_socket.send(message)
         # server_socket.send(message)
+        elif message.startswith("SHOW_PRIVATE"):
+            handle_show_private(message)
         else:
             print("Invalid command.")
 

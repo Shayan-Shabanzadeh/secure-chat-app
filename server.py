@@ -340,16 +340,29 @@ def handle_forward(client_socket, data_header, data_main):
     data_header_parts = data_header.split("||")
     from_user = server_repository.find_user_by_username(data_header_parts[1])
     dest_user = server_repository.find_user_by_username(data_header_parts[2])
-    if from_user is None or dest_user is None:
-        client_socket.send("something is wrong!".encode())
-    dest_user_socket = clients.get(dest_user.username)
-    data_main = decrypt_data(from_user.master_key, data_main)
-    if(type(data_main) == str):
-        data_main = data_main.encode() 
-    data_main_parts = data_main.split(b"||")  
-    data_main = b"||".join(data_main_parts[1:])
-    encrypted_message = encrypt_with_master_key(dest_user.master_key.decode(), data_main , "FORWARD")
-    dest_user_socket.send(encrypted_message)
+    error = None
+    if from_user is None:
+        error = "you should sign up first"
+    elif from_user.is_online == False:
+        error = "you should login first"    
+    elif dest_user is None:
+        error = "dest user is not valid"
+    elif dest_user.is_online == False:
+        error = "dest user is not valid"
+    if(error):
+        encrypted_message = encrypt_with_master_key(from_user.master_key.decode(), "error||" + error  , "ACK")
+    else:
+        dest_user_socket = clients.get(dest_user.username)
+        data_main = decrypt_data(from_user.master_key, data_main)
+        if(type(data_main) == str):
+            data_main = data_main.encode() 
+        data_main_parts = data_main.split(b"||")  
+        data_main = b"||".join(data_main_parts[1:])
+        encrypted_message = encrypt_with_master_key(dest_user.master_key.decode(), data_main , "FORWARD")
+        dest_user_socket.send(encrypted_message)
+        encrypted_message = encrypt_with_master_key(from_user.master_key.decode(), "ok" , "ACK")
+    client_socket.send(encrypted_message)
+
 
 def handle_online_users(client_socket, data_header, data_main):
     data_header_parts = data_header.split("||")
