@@ -2,8 +2,8 @@ import random
 import time
 from datetime import datetime, timedelta
 
-import cryptography
 from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization, asymmetric, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 
@@ -91,10 +91,12 @@ def check_message_timestamp(timestamp: int):
 
 def create_signature(private_key, data):
     private_key = serialization.load_pem_private_key(private_key.encode('utf-8'), password=None)
-
+    digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    digest.update(data)
+    hashed_data = digest.finalize()
     # Generate signature using the private key
     signature = private_key.sign(
-        data,
+        hashed_data,
         asymmetric.padding.PSS(
             mgf=asymmetric.padding.MGF1(hashes.SHA256()),
             salt_length=asymmetric.padding.PSS.MAX_LENGTH
@@ -105,22 +107,25 @@ def create_signature(private_key, data):
     return signature
 
 
-def verify_signature(public_key, message, signature):
-    public_key = serialization.load_pem_public_key(public_key.encode('utf-8'))
+def verify_signature(public_key, data, signature):
+    # Hash the data using the same hash function used during signing
+    digest = hashes.Hash(hashes.SHA256(), backend=default_backend())
+    digest.update(data)
+    hashed_data = digest.finalize()
 
     # Verify the signature using the public key
     try:
         public_key.verify(
             signature,
-            message.encode('utf-8'),
-            asymmetric.padding.PSS(
-                mgf=asymmetric.padding.MGF1(hashes.SHA256()),
-                salt_length=asymmetric.padding.PSS.MAX_LENGTH
+            hashed_data,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
             ),
             hashes.SHA256()
         )
         return True
-    except cryptography.exceptions.InvalidSignature:
+    except Exception:
         return False
 
 

@@ -3,7 +3,6 @@ import socket
 import threading
 import traceback
 
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
@@ -193,6 +192,12 @@ def encrypt_for_public_key(user_des: str):
     return encrypted_message
 
 
+def encrypt_for_create_group(message):
+    _, group_name, *members = message.split()
+
+
+
+
 def handle_signup(data_main):
     utils.decode_with_private_key(ciphertext=data_main, private_key=private_key)
     save_private_key(private_key_bytes)
@@ -332,6 +337,14 @@ def send_data(server_socket):
                     print("User Logged out successfully")
             elif message.startswith("PRIVATE"):
                 handle_send_private(server_socket, message)
+
+            elif message.startswith("CREATE_GROUP"):
+                if not isLogin:
+                    print("You must login first.")
+                    continue
+                msg = encrypt_for_create_group(message)
+                server_socket.send(msg)
+
 
             # server_socket.send(message)
             else:
