@@ -1,5 +1,6 @@
 import socket
 import threading
+import traceback
 from collections import defaultdict
 
 import bcrypt
@@ -7,6 +8,7 @@ from Cryptodome.Cipher import AES
 from cryptography.hazmat.backends import default_backend
 
 import server_repository
+import utils
 from utils import *
 
 header_size = 500
@@ -34,20 +36,11 @@ server_public_key = serialization.load_pem_public_key(
 
 def decrypt_first_message(ciphertext, private_key):
     # Decrypt the ciphertext with the private key
-    decrypted_data = private_key.decrypt(
-        ciphertext,
-        padding.OAEP(
-            mgf=padding.MGF1(algorithm=hashes.SHA256()),
-            algorithm=hashes.SHA256(),
-            label=None
-        )
-    )
+    decrypted_data = utils.decode_with_private_key(private_key=private_key, ciphertext=ciphertext)
     decrypted_data = decrypted_data.decode()
     decrypted_parts = decrypted_data.split("||")
-    nonce = decrypted_parts[0]
     message = decrypted_parts[1]
-
-    return nonce, message
+    return message
 
 
 # AES encryption key (must be 16, 24, or 32 bytes long)
@@ -95,80 +88,84 @@ def handle_client(client_socket, client_address):
     _username = ""
 
     while True:
-        # receive data from the client
         try:
-            data = client_socket.recv(2048)
-            if len(data) >= 500:
-                data_header = data[:header_size].decode()
-                data_main = data[header_size:]
+            # receive data from the client
+            try:
+                data = client_socket.recv(2048)
+                if len(data) >= 500:
+                    data_header = data[:header_size].decode()
+                    data_main = data[header_size:]
+                else:
+                    data_header = data.decode()
+            except ValueError:
+                print("Error")
+                client_socket.send("Error: Key incorrect or message corrupted".encode())
+                continue
+
+            print(data_header.upper())
+
+            # handle login
+            if data_header.upper().startswith("LOGIN"):
+                _username = handle_login(client_socket, data_main)
+
+            # handle login
+            elif data_header.upper().startswith("LOGOUT"):
+                _username = handle_logout(client_socket, data_header, data_main)
+
+            # handle signup
+            elif data_header.upper().startswith("SIGNUP"):
+                _username = handle_signup(client_socket, data_header, data_main)
+
+            # handle public_key request
+            elif data_header.upper().startswith("PUBLIC"):
+                _username = handle_public(client_socket, data_header, data_main)
+
+
+
+            # handle group chat
+            elif data_header.startswith("GROUP"):
+                handle_group(client_socket, data, _username)
+
+            # handle private chat
+            elif data_header.startswith("PRIVATE"):
+                handle_private(client_socket, data)
+
+            elif data_header.startswith("FORWARD"):
+                handle_forward(client_socket, data_header, data_main)
+            # handle create group
+            elif data_header.startswith("CREATE_GROUP"):
+                handle_create_group(client_socket, data)
+
+            # handle join group
+            elif data_header.startswith("JOIN_GROUP"):
+                handle_join_group(client_socket, data, _username)
+
+            # handle leave group
+            elif data_header.startswith("LEAVE_GROUP"):
+                handle_leave_group(client_socket, data, _username)
+
+            elif (data_header.startswith("ONLINE_USERS")):
+                handle_online_users(client_socket, data_header, data_main)
+            # handle list groups
+            # elif data_header.startswith("LIST_GROUPS"):
+            #     handle_list_groups(client_socket)
+
+            # handle list members
+            # elif data_header.startswith("LIST_MEMBERS"):
+            #     handle_list_members(client_socket, data)
+
+            # handle quit
+            elif data_header.startswith("QUIT"):
+                client_socket.close()
+                break
+
+            # handle invalid command
             else:
-                data_header = data.decode()
-        except ValueError:
-            print("Error")
-            client_socket.send("Error: Key incorrect or message corrupted".encode())
-            continue
-
-        print(data_header.upper())
-
-        # handle login
-        if data_header.upper().startswith("LOGIN"):
-            _username = handle_login(client_socket, data_main)
-
-        # handle login
-        elif data_header.upper().startswith("LOGOUT"):
-            _username = handle_logout(client_socket, data_header, data_main)
-
-        # handle signup
-        elif data_header.upper().startswith("SIGNUP"):
-            _username = handle_signup(client_socket, data_header, data_main)
-
-        # handle public_key request
-        elif data_header.upper().startswith("PUBLIC"):
-            _username = handle_public(client_socket, data_header, data_main)
-
-
-
-        # handle group chat
-        elif data_header.startswith("GROUP"):
-            handle_group(client_socket, data, _username)
-
-        # handle private chat
-        elif data_header.startswith("PRIVATE"):
-            handle_private(client_socket, data)
-
-        elif data_header.startswith("FORWARD"):
-            handle_forward(client_socket, data_header, data_main)
-        # handle create group
-        elif data_header.startswith("CREATE_GROUP"):
-            handle_create_group(client_socket, data)
-
-        # handle join group
-        elif data_header.startswith("JOIN_GROUP"):
-            handle_join_group(client_socket, data, _username)
-
-        # handle leave group
-        elif data_header.startswith("LEAVE_GROUP"):
-            handle_leave_group(client_socket, data, _username)
-
-        elif(data_header.startswith("ONLINE_USERS")):
-            handle_online_users(client_socket,data_header,data_main)
-        # handle list groups
-        # elif data_header.startswith("LIST_GROUPS"):
-        #     handle_list_groups(client_socket)
-
-        # handle list members
-        # elif data_header.startswith("LIST_MEMBERS"):
-        #     handle_list_members(client_socket, data)
-
-        # handle quit
-        elif data_header.startswith("QUIT"):
-            client_socket.close()
-            break
-
-        # handle invalid command
-        else:
-            print("command is : " + data_header)
-            client_socket.send("Error: Invalid command".encode())
+                print("command is : " + data_header)
+                client_socket.send("Error: Invalid command".encode())
+        except Exception as e:
+            print(e)
+            traceback.print_exc()
 
     print(f"Client disconnected: {client_address}")
 
@@ -254,8 +251,8 @@ def handle_signup(client_socket, data_header, data_main):
         serialized_public_key,
         backend=default_backend()
     )
-    nonce, message = decrypt_first_message(data_main, server_private_key)
-    print(message)
+    message = decrypt_first_message(data_main, server_private_key)
+    # print(message)
     _, username, password = message.split()
     user = server_repository.find_user_by_username(username=username)
     if user:
@@ -267,27 +264,15 @@ def handle_signup(client_socket, data_header, data_main):
         server_repository.add_user(username=username, password=password, public_key=serialized_public_key,
                                    is_online=False)
         msg = "successfully signed up"
-        response_message = nonce + "||" + msg
-        response_message = response_message.encode()
         # Encrypt the response message with the received public key
-        encrypted_response = public_key.encrypt(
-            response_message,
-            padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
-                algorithm=hashes.SHA256(),
-                label=None
-            )
-        )
-        header = b"SIGNUP||"
-        # Pad the header with null bytes ('\x00') to reach the desired size
-        padded_header = header.ljust(header_size, b'\x00')
-        response_message = padded_header + encrypted_response
-        client_socket.send(response_message)
+        encrypted_response = utils.encode_with_public_key(public_key=serialized_public_key, message=msg,
+                                                          header="SIGNUP")
+        client_socket.send(encrypted_response)
         return username
 
 
 def handle_login(client_socket, data_main):
-    time_stamps, message = decrypt_first_message(data_main, server_private_key)
+    message = decrypt_first_message(data_main, server_private_key)
     _, username, password = message.split()
     user = server_repository.find_user_by_username(username=username)
     if user is None:
@@ -344,23 +329,23 @@ def handle_forward(client_socket, data_header, data_main):
     if from_user is None:
         error = "you should sign up first"
     elif from_user.is_online == False:
-        error = "you should login first"    
+        error = "you should login first"
     elif dest_user is None:
         error = "dest user is not valid"
     elif dest_user.is_online == False:
         error = "dest user is not valid"
-    if(error):
-        encrypted_message = encrypt_with_master_key(from_user.master_key.decode(), "error||" + error  , "ACK")
+    if (error):
+        encrypted_message = encrypt_with_master_key(from_user.master_key.decode(), "error||" + error, "ACK")
     else:
         dest_user_socket = clients.get(dest_user.username)
         data_main = decrypt_data(from_user.master_key, data_main)
-        if(type(data_main) == str):
-            data_main = data_main.encode() 
-        data_main_parts = data_main.split(b"||")  
+        if (type(data_main) == str):
+            data_main = data_main.encode()
+        data_main_parts = data_main.split(b"||")
         data_main = b"||".join(data_main_parts[1:])
-        encrypted_message = encrypt_with_master_key(dest_user.master_key.decode(), data_main , "FORWARD")
+        encrypted_message = encrypt_with_master_key(dest_user.master_key.decode(), data_main, "FORWARD")
         dest_user_socket.send(encrypted_message)
-        encrypted_message = encrypt_with_master_key(from_user.master_key.decode(), "ok" , "ACK")
+        encrypted_message = encrypt_with_master_key(from_user.master_key.decode(), "ok", "ACK")
     client_socket.send(encrypted_message)
 
 
@@ -369,8 +354,9 @@ def handle_online_users(client_socket, data_header, data_main):
     user = server_repository.find_user_by_username(data_header_parts[1])
     online_users = server_repository.find_all_online_users()
     online_users = "\n".join(online_users)
-    encrypted_data = encrypt_with_master_key(user.master_key,online_users,"ONLINE_USERS")
+    encrypted_data = encrypt_with_master_key(user.master_key, online_users, "ONLINE_USERS")
     client_socket.send(encrypted_data)
+
 
 # function to start server
 def start_server():
@@ -378,7 +364,7 @@ def start_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     # bind socket to address and port
-    server_address = ("localhost", 9000)
+    server_address = ("localhost", 9030)
     server_socket.bind(server_address)
 
     # listen for incoming connections
