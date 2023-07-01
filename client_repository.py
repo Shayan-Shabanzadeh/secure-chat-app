@@ -27,7 +27,8 @@ def find_session_key(username):
     session_key = session.query(SessionKeys).filter_by(username=username).first()
     session.close()
     if session_key:
-        return decrypt_data(MyKey, session_key.session_key)
+        data = decrypt_data(MyKey, session_key.session_key)
+        return data
     else:
         return None
 
@@ -68,6 +69,7 @@ def remove_session(username):
         session.close()
 
 
+# This method could throw exception
 def find_messages_between_users(user1, user2):
     session = Session()
     messages = session.query(Chat).filter(
@@ -77,7 +79,8 @@ def find_messages_between_users(user1, user2):
     session.close()
     decrypted_messages = []
     for message in messages:
-        decrypted_messages.append(decrypt_data(MyKey, messages))
+        decrypted_message = decrypt_data(MyKey, message)
+        decrypted_messages.append(decrypted_message)
     return decrypted_messages
 
 
