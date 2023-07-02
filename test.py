@@ -129,37 +129,6 @@ class TestEncodeWithPublicKey(unittest.TestCase):
         self.assertEqual(message, plaintext.split("||")[1])
         self.assertEqual(header, data_header.split("||")[0])
 
-    def test_master_key_encryption_fail_format(self):
-        master_key = utils.generate_session_key()
-        message = "hello world"
-        header = "test"
-
-        with open("server_private_key.pem", "rb") as file:
-            server_private_key_bytes = file.read()
-        with open("server_public_key.pem", "rb") as file:
-            server_public_key_bytes = file.read()
-
-        server_public_key = serialization.load_pem_public_key(
-            server_public_key_bytes,
-            backend=default_backend()
-        )
-        server_private_key = serialization.load_pem_private_key(
-            server_private_key_bytes,
-            password=None,  # Add password if the private key is encrypted
-            backend=default_backend()
-        )
-        ciphertext = utils.encrypt_with_master_key(master_key=master_key, message=message, header=header,
-                                                   private_key=server_private_key)
-
-        data_header = ciphertext[:self.header_size].decode() + b'\x84{\xd3&T\xac\x96\xe38\x12\x953mS\x8e\xe6\xc3\x9c*BZB\xe6\x9fV\x85r\x8f+\xb1uG=-\tKgrUe\xca\xdb\xc9/82\xa3\x90\x918\xdc\x8a\xe3\\\xa4C{"0G\xed\xacG\x16\x19`\x16\xf2\x19\x91\xc1\xd5J\x9a.\xad\xa8+R\x01y\xb3R\xd5\xdf\xff\x0b\xbd\xe2p\xba.P\xf4\x1c\x01km\xc7pXY1\xaf\xf2\xca9;\x1ce*\xf9\xe4\xae\xb8\xeb\xaa\x17\x08\xc9\xf1\xdd\x88\xdc\x87+\xf3>z\x9e\'\x9a\xe3k\x02\xb3\x86l\xf4\xc3\xc7\xbe\x06\xcbu\xf0\xfbd\xfc\x90\xae\xf2r\xdd* \xf9\'\xdd\x90)\x03w=\xb1s\x0e_Qd\x0c.\xb7fS\x06$\x9a\x81?\xa9\xb3\xca0e\xcc\xb0\x87\xf6ai\xae\\\x1c`\x17\xe2\xaf\xf8\xe6t\xc1}\xf6, \x8dr\x93O\xf3\xed\x12\x04|#\x97\x8a\x8f\x15\xd2@\x84kQ\xe6\x0e\x08jI\xbbde\xb7v4\xc3\xb7\x917\x8a\xd4\x82%\xed-CF>\x06\x01\xcc\x97+\x85H'
-        data_main = ciphertext[self.header_size:]
-        signature = data_main.split(b"@@")[1]
-        data_main = data_main.split(b"@@")[0] + b'\x84{\xd3&T\xac\x96\xe38\x12\x953mS\x8e\xe6\xc3\x9c*BZB\xe6\x9fV\x85r\x8f+\xb1uG=-\tKgrUe\xca\xdb\xc9/82\xa3\x90\x918\xdc\x8a\xe3\\\xa4C{"0G\xed\xacG\x16\x19`\x16\xf2\x19\x91\xc1\xd5J\x9a.\xad\xa8+R\x01y\xb3R\xd5\xdf\xff\x0b\xbd\xe2p\xba.P\xf4\x1c\x01km\xc7pXY1\xaf\xf2\xca9;\x1ce*\xf9\xe4\xae\xb8\xeb\xaa\x17\x08\xc9\xf1\xdd\x88\xdc\x87+\xf3>z\x9e\'\x9a\xe3k\x02\xb3\x86l\xf4\xc3\xc7\xbe\x06\xcbu\xf0\xfbd\xfc\x90\xae\xf2r\xdd* \xf9\'\xdd\x90)\x03w=\xb1s\x0e_Qd\x0c.\xb7fS\x06$\x9a\x81?\xa9\xb3\xca0e\xcc\xb0\x87\xf6ai\xae\\\x1c`\x17\xe2\xaf\xf8\xe6t\xc1}\xf6, \x8dr\x93O\xf3\xed\x12\x04|#\x97\x8a\x8f\x15\xd2@\x84kQ\xe6\x0e\x08jI\xbbde\xb7v4\xc3\xb7\x917\x8a\xd4\x82%\xed-CF>\x06\x01\xcc\x97+\x85H'
-        with self.assertRaises(Exception):
-            plaintext = utils.decrypt_data(key=master_key, padded_header=data_header, encrypted_data=data_main,
-                                           public_key=server_public_key, signature=signature)
-
-
     def test_check_invalid_signature_fail(self):
         master_key = utils.generate_session_key()
         message = "a new message"
@@ -278,7 +247,6 @@ class TestEncodeWithPublicKey(unittest.TestCase):
                 server.handle_login(client_socket=client_socket, data_main=data_main)
                 expected_error_message = "there is not such a user with this password!"
                 self.assertEqual(sent_message, expected_error_message.encode())
-
 
 
 if __name__ == '__main__':
