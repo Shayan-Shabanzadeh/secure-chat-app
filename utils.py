@@ -66,8 +66,6 @@ def encode_with_public_key(public_key, message, header):
 
 
 def create_signature(private_key, data):
-    private_key = serialization.load_pem_private_key(private_key.encode('utf-8'), password=None)
-
     # Generate signature using the private key
     signature = private_key.sign(
         data,
@@ -82,13 +80,13 @@ def create_signature(private_key, data):
 
 
 def verify_signature(public_key, message, signature):
-    public_key = serialization.load_pem_public_key(public_key.encode('utf-8'))
-
     # Verify the signature using the public key
+    if(type(message) == str):
+        message = message.encode()
     try:
         public_key.verify(
             signature,
-            message.encode('utf-8'),
+            message,
             asymmetric.padding.PSS(
                 mgf=asymmetric.padding.MGF1(hashes.SHA256()),
                 salt_length=asymmetric.padding.PSS.MAX_LENGTH
@@ -144,7 +142,7 @@ def extract_expire_time(session_key):
     return expiration_datetime
 
 
-def encrypt_with_master_key(master_key, message, header):
+def encrypt_with_master_key(master_key, message, header, private_key):
     timestamp = int(time.time())
     # Append client public key, nonce, and message
     if (type(message) == str):
@@ -158,6 +156,8 @@ def encrypt_with_master_key(master_key, message, header):
         header += b"||"
     padded_header = header.ljust(header_size, b'\x00')
     ciphertext = padded_header + ciphertext
+    signature = create_signature(private_key, padded_header + data)
+    ciphertext += b"@@" + signature
     return ciphertext
 
 
@@ -167,19 +167,17 @@ def encrypt_data(key, data):
 
     # Create a Fernet cipher object with the key
     cipher = Fernet(key)
-
     if (type(data) != bytes):
         # Convert the data to bytes
         data = data.encode()
 
     # Encrypt the data
     encrypted_data = cipher.encrypt(data)
-
     # Return the encrypted data
     return encrypted_data
 
 
-def decrypt_data(key, encrypted_data):
+def decrypt_data(key,padded_header, encrypted_data, signature,public_key):
     if (type(key) == int):
         key = int_to_32_bytes(key)
 
@@ -188,7 +186,9 @@ def decrypt_data(key, encrypted_data):
 
     # Decrypt the encrypted data
     data = cipher.decrypt(encrypted_data)
-
+    is_verified = verify_signature(public_key,padded_header.encode() + data,signature)
+    if(is_verified == False):
+        raise ValueError("message is currupted")
     try:
         # Convert the decrypted data to a string
         data = data.decode()
@@ -204,6 +204,29 @@ def decrypt_data(key, encrypted_data):
     # Return the decrypted data
     return data
 
+def decrypt_data_simple(key, encrypted_data):
+    if (type(key) == int):
+        key = int_to_32_bytes(key)
+
+    # Create a Fernet cipher object with the key
+    cipher = Fernet(key)
+
+    # Decrypt the encrypted data
+    data = cipher.decrypt(encrypted_data)
+    try:
+        # Convert the decrypted data to a string
+        data = data.decode()
+        timestamp_str = data.split("||")[0]
+        if not timestamp_str.isdigit():
+            raise ValueError("Timestamp format error")
+
+        timestamp = int(timestamp_str)
+        check_message_timestamp(timestamp)
+    except Exception as e:
+        e = e
+
+    # Return the decrypted data
+    return data
 
 def int_to_32_bytes(num):
     byte_length = 32

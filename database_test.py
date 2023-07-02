@@ -6,7 +6,7 @@ cursor = conn.cursor()
 
 # Execute the SQL query to delete the column
 cursor.execute('''
-    DELETE from Chattt
+    DELETE from Chat
 ''')
 
 # Commit the changes and close the connection

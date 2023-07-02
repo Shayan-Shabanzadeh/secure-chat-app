@@ -89,20 +89,20 @@ def handle_client(client_socket, client_address):
 
     while True:
         try:
-            # receive data from the client
-            try:
-                data = client_socket.recv(2048)
-                if len(data) >= 500:
-                    data_header = data[:header_size].decode()
-                    data_main = data[header_size:]
-                else:
-                    data_header = data.decode()
-            except ValueError:
-                print("Error")
-                client_socket.send("Error: Key incorrect or message corrupted".encode())
-                continue
-
-            print(data_header.upper())
+        # receive data from the client
+            data = client_socket.recv(4000)
+            if len(data) >= 500:
+                data_header = data[:header_size]
+                try:
+                    data_header = data_header.decode()
+                except:
+                    print(data_header)
+                    data_header = data_header.decode()
+                data_main = data[header_size:]
+            else:
+                data_header = data.decode()
+                print(data_header)
+            # print(data_header.upper())
 
             # handle login
             if data_header.upper().startswith("LOGIN"):
@@ -110,7 +110,9 @@ def handle_client(client_socket, client_address):
 
             # handle login
             elif data_header.upper().startswith("LOGOUT"):
-                _username = handle_logout(client_socket, data_header, data_main)
+                signature = data_main.split(b"@@")[1]
+                data_main = data_main.split(b"@@")[0]
+                _username = handle_logout(client_socket, data_header, data_main,signature)
 
             # handle signup
             elif data_header.upper().startswith("SIGNUP"):
@@ -118,7 +120,9 @@ def handle_client(client_socket, client_address):
 
             # handle public_key request
             elif data_header.upper().startswith("PUBLIC"):
-                _username = handle_public(client_socket, data_header, data_main)
+                signature = data_main.split(b"@@")[1]
+                data_main = data_main.split(b"@@")[0]
+                _username = handle_public(client_socket, data_header, data_main,signature)
 
 
 
@@ -131,7 +135,10 @@ def handle_client(client_socket, client_address):
                 handle_private(client_socket, data)
 
             elif data_header.startswith("FORWARD"):
-                handle_forward(client_socket, data_header, data_main)
+                signature = data_main.split(b"@@")[1]
+                data_main = data_main.split(b"@@")[0]
+                handle_forward(client_socket, data_header, data_main,signature)
+
             # handle create group
             elif data_header.startswith("CREATE_GROUP"):
                 handle_create_group(client_socket, data)
@@ -291,19 +298,36 @@ def handle_login(client_socket, data_main):
     return username
 
 
-def handle_logout(client_socket, data_header, data_main):
+def handle_logout(client_socket, data_header, data_main,signature):
     data_header_parts = data_header.split("||")
     user = server_repository.find_user_by_username(data_header_parts[1])
-    decrypted_data = decrypt_data(user.master_key, data_main)
+    public_key = serialization.load_pem_public_key(
+    user.public_key,
+    backend=default_backend()
+    )
+    try:
+        decrypted_data = decrypt_data(user.master_key,data_header, data_main,signature,public_key)
+    except ValueError as e:
+        print(e)
+        return
     decrypted_data_parts = decrypted_data.split("||")
     server_repository.change_user_status(user.username, False)
     return user.username
 
 
-def handle_public(client_socket, data_header, data_main):
+def handle_public(client_socket, data_header, data_main,signature):
     data_header_parts = data_header.split("||")
     user1 = server_repository.find_user_by_username(data_header_parts[1])
-    data_main_decrypted_parts = decrypt_data(user1.master_key, data_main).split("||")
+    public_key = serialization.load_pem_public_key(
+    user1.public_key,
+    backend=default_backend()
+    )
+    try:
+        data_main_decrypted = decrypt_data(user1.master_key,data_header, data_main,signature,public_key)
+    except ValueError as e:
+        print(e)
+        return
+    data_main_decrypted_parts = data_main_decrypted.split("||")
     if user1 is None or user1.is_online is False:
         client_socket.send("You should Login first!".encode())
         return
@@ -317,11 +341,11 @@ def handle_public(client_socket, data_header, data_main):
         client_socket.send("this user is not online!".encode())
         return
     header = "PUBLIC||".encode() + user2.public_key
-    encrypted_message = encrypt_with_master_key(user1.master_key, user2.username, header)
+    encrypted_message = encrypt_with_master_key(user1.master_key, user2.username, header,server_private_key)
     client_socket.send(encrypted_message)
 
 
-def handle_forward(client_socket, data_header, data_main):
+def handle_forward(client_socket, data_header, data_main,signature):
     data_header_parts = data_header.split("||")
     from_user = server_repository.find_user_by_username(data_header_parts[1])
     dest_user = server_repository.find_user_by_username(data_header_parts[2])
@@ -335,17 +359,25 @@ def handle_forward(client_socket, data_header, data_main):
     elif dest_user.is_online == False:
         error = "dest user is not valid"
     if (error):
-        encrypted_message = encrypt_with_master_key(from_user.master_key.decode(), "error||" + error, "ACK")
+        encrypted_message = encrypt_with_master_key(from_user.master_key.decode(), "error||" + error, "ACK",server_private_key)
     else:
         dest_user_socket = clients.get(dest_user.username)
-        data_main = decrypt_data(from_user.master_key, data_main)
+        public_key = serialization.load_pem_public_key(
+        from_user.public_key,
+        backend=default_backend()
+        )
+        try:
+            data_main = decrypt_data(from_user.master_key,data_header, data_main,signature,public_key)
+        except ValueError as e:
+            print(e)
+            return
         if (type(data_main) == str):
             data_main = data_main.encode()
         data_main_parts = data_main.split(b"||")
         data_main = b"||".join(data_main_parts[1:])
-        encrypted_message = encrypt_with_master_key(dest_user.master_key.decode(), data_main, "FORWARD")
+        encrypted_message = encrypt_with_master_key(dest_user.master_key.decode(), data_main, "FORWARD",server_private_key)
         dest_user_socket.send(encrypted_message)
-        encrypted_message = encrypt_with_master_key(from_user.master_key.decode(), "ok", "ACK")
+        encrypted_message = encrypt_with_master_key(from_user.master_key.decode(), "ok", "ACK",server_private_key)
     client_socket.send(encrypted_message)
 
 
@@ -354,7 +386,7 @@ def handle_online_users(client_socket, data_header, data_main):
     user = server_repository.find_user_by_username(data_header_parts[1])
     online_users = server_repository.find_all_online_users()
     online_users = "\n".join(online_users)
-    encrypted_data = encrypt_with_master_key(user.master_key, online_users, "ONLINE_USERS")
+    encrypted_data = encrypt_with_master_key(user.master_key, online_users, "ONLINE_USERS",server_private_key)
     client_socket.send(encrypted_data)
 
 

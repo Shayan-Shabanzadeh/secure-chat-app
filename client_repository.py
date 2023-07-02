@@ -28,7 +28,7 @@ def find_session_key(username):
     session_key = session.query(SessionKeys).filter_by(username=username).first()
     session.close()
     if session_key:
-        data = decrypt_data(MyKey, session_key.session_key)
+        data = decrypt_data_simple(MyKey, session_key.session_key)
         return data
     else:
         return None
@@ -78,11 +78,8 @@ def find_messages_between_users(user1, user2, myKey, myUser):
         ((Chat.sender == user1) & (Chat.receiver == user2) & (Chat.username == myUser)) |
         ((Chat.sender == user2) & (Chat.receiver == user1) & (Chat.username == myUser))
     )
-    all_messages = query.all()
-    messages = []
-    for msg in all_messages:
-        msg = decrypt_data(myKey,msg)
-        messages.append(msg)
+    messages = query.all()
+    
     session.close()
     chat_part1 = []
     chat_part1_index = []
@@ -111,7 +108,14 @@ def find_messages_between_users(user1, user2, myKey, myUser):
     for i in range (len(sorted_part2)):
         messages[chat_part2_index[i]] = sorted_part2[i]
 
-    chat_strings = [str(chat) for chat in messages]
+    decrypted_messages = []
+    for msg in messages:
+        msg_string = decrypt_data_simple(myKey,msg.message)
+        msg.message = msg_string
+        decrypted_messages.append(msg)
+
+    chat_strings = [str(chat) for chat in decrypted_messages]
+    
     # decrypted_messages = []
     # for message in messages:
     #     decrypted_message = decrypt_data(MyKey, message)
