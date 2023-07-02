@@ -151,6 +151,36 @@ def add_user_to_group(username, group_id):
     finally:
         session.close()
 
+def is_username_in_group(group_name, username):
+    session = Session()
+    group = session.query(Group).filter_by(name=group_name).first()
+    if group:
+        if any(user.username == username for user in group.users):
+            return True
+        else:
+            return False
+    else:
+        return False
+    
+def add_user_by_username(group_name, username):
+    session = Session()
+    group = session.query(Group).filter_by(name=group_name).first()
+    if group:
+        # Check if the user already exists in the group
+        if any(user.username == username for user in group.users):
+            print(f"User '{username}' already exists in group '{group_name}'.")
+        else:
+            # Add the user to the group
+            user = session.query(User).filter_by(username=username).first()
+            if user:
+                group.users.append(user)
+                session.commit()
+                print(f"User '{username}' added to group '{group_name}' successfully.")
+            else:
+                print(f"User '{username}' not found.")
+    else:
+        print(f"Group '{group_name}' not found.")
+    session.close()
 
 def add_user(username, password, public_key, is_online):
     session = Session()

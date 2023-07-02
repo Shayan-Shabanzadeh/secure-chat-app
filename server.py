@@ -275,10 +275,15 @@ def handle_add_member(client_socket, data_header, data_main, signature):
             member_user = server_repository.find_user_by_username(member_username)
             if(member_user == None):
                 error = "there is not a user with this username"
+            else:
+                is_usename_exist = server_repository.is_username_in_group(group_name,member_username)
+                if(is_usename_exist):
+                    error ="this username already exist"
     encrypted_message = None
     if(error):
         encrypted_message = encrypt_with_master_key(admin_user.master_key.decode(), "error||" + error, "ACK",server_private_key)
     else:
+        server_repository.add_user_by_username(group_name,member_username)
         encrypted_message = encrypt_with_master_key(admin_user.master_key.decode(), "add_member_ok", "ACK",server_private_key)
     client_socket.send(encrypted_message) 
 
