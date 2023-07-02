@@ -28,6 +28,9 @@ diffie_private_key = None
 diffie_public_key = None
 myKey = None
 dest_user_public_key = None
+group_session_keys = {}
+my_group_session_key = None
+my_group_name = None
 
 def dataSplit(data):
     data_header = data[:header_size].decode()
@@ -248,7 +251,19 @@ def encrypt_for_signup_online_users():
     encrypted_message = encrypt_with_master_key(master_key, "", "ONLINE_USERS||" + username,private_key)
     return encrypted_message
 
-
+def encrypt_for_create_group(message):
+    group_name = message.split()[1]
+    global username
+    if not username:
+        print("You must login first")
+        return
+    session_key = generate_session_key()
+    global my_group_session_key, my_group_name
+    my_group_session_key = session_key
+    my_group_name = group_name
+    header = "CREATE_GROUP||" + username 
+    encrypted_message = encrypt_with_master_key(master_key,group_name,header,private_key)
+    return encrypted_message
 # AES encryption key (must be 16, 24, or 32 bytes long)
 KEY = b'mysecretpassword'
 
@@ -280,6 +295,7 @@ def handle_signup(data_main):
     decrypted_response.decode()
     save_private_key(private_key_bytes)
     save_public_key(public_key_bytes)
+    print("sussessfully signed up")
 
 
 def handle_login(data_main):
@@ -360,6 +376,15 @@ def encrypt_for_private_message(server_socket, message, dest_user):
     header = "FORWARD||" + username + "||" + dest_user
     super_encrypted_message = encrypt_with_master_key(master_key, encrypted_message, header,private_key)
     return super_encrypted_message
+
+def encrypt_for_add_member(message):
+    if(username == None):
+        print("You should login first")
+        return
+    username_member = message.split()[2]
+    group_name = message.split()[1]
+    encrypted_message = encrypt_with_master_key(master_key,group_name + "||" + username_member,"ADD_MEMBER||" + username,private_key)
+    return encrypted_message
 
 
 def handle_forward(data, server_socket,data_header,signature):
@@ -445,11 +470,16 @@ def handle_ack(data_main,data_header,signature):
     if (decrypted_message_parts[1] == "error"):
         print(decrypted_message_parts[2])
         send_message_done()
-    if(decrypted_message_parts[1] == "ok"):
+    elif(decrypted_message_parts[1] == "ok"):
         if(dest_username != None):
             client_repository.add_chat_message(username,dest_username,dest_user_message,dest_user_seq,myKey,username)
             print("me -> " + dest_username + " : " + dest_user_message)
             send_message_done()
+    elif(decrypted_message_parts[1] == "group_ok"):
+        group_session_keys[my_group_name] = my_group_session_key
+        print("group " + my_group_name + " created")
+    elif(decrypted_message_parts[1] == "add_member_ok"):
+        print("member added successfully")
 
 
 def send_message_done():
@@ -500,6 +530,9 @@ def receive_data(server_socket):
                 signature = data_main.split(b"@@")[1]
                 data_main = data_main.split(b"@@")[0]
                 handle_ack(data_main, data_header,signature)
+
+            
+
 # function to send data to server
 def send_data(server_socket):
     while True:
@@ -544,6 +577,13 @@ def send_data(server_socket):
             diffie_private_key = None
             diffie_public_key = None
             message = handle_send_private(server_socket, message)
+        
+        elif message.startswith("CREATE_GROUP"):
+            message = encrypt_for_create_group(message)
+            server_socket.send(message)
+        elif message.startswith("ADD_MEMBER"):
+            message = encrypt_for_add_member(message)
+            server_socket.send(message)
         else:
             print("Invalid command.")
 

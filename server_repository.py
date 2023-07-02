@@ -47,23 +47,38 @@ class Group(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(255), unique=True, nullable=False)
-    session_key = Column(String(255), nullable=False)
-
+    admin = Column(String(255), unique=True, nullable=False)
     # Define the many-to-many relationship with User
     users = relationship('User', secondary=group_user_association, back_populates='groups')
 
+def is_group(group_name):
+    # Create a session
+    session = Session()
 
-def create_group(group_name, session_key, admin_username, user_usernames):
+    # Query the Group table to check if a group with the given name exists
+    group_exists = session.query(Group).filter_by(name=group_name).scalar() is not None
+
+    # Close the session
+    session.close()
+
+    return group_exists
+
+def get_admin_username(group_name):
+    session = Session()
+    group = session.query(Group).filter_by(name=group_name).first()
+    if group:
+        session.close()
+        return group.admin
+    else:
+        session.close()
+        return None
+    
+    
+def create_group(group_name, admin_username):
     session = Session()
     try:
-        # Retrieve the admin user by username
-        admin = session.query(User).filter_by(username=admin_username).first()
 
-        # Retrieve the user objects for the given usernames
-        users = session.query(User).filter(User.username.in_(user_usernames)).all()
-
-        group = Group(name=group_name, session_key=session_key, admin=admin)
-        group.users.extend(users)
+        group = Group(name=group_name, admin=admin_username)
 
         session.add(group)
         session.commit()

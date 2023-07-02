@@ -141,11 +141,15 @@ def handle_client(client_socket, client_address):
 
             # handle create group
             elif data_header.startswith("CREATE_GROUP"):
-                handle_create_group(client_socket, data)
+                signature = data_main.split(b"@@")[1]
+                data_main = data_main.split(b"@@")[0]
+                handle_create_group(client_socket, data_header,data_main,signature)
 
             # handle join group
-            elif data_header.startswith("JOIN_GROUP"):
-                handle_join_group(client_socket, data, _username)
+            elif data_header.startswith("ADD_MEMBER"):
+                signature = data_main.split(b"@@")[1]
+                data_main = data_main.split(b"@@")[0]
+                handle_add_member(client_socket, data_header,data_main,signature)
 
             # handle leave group
             elif data_header.startswith("LEAVE_GROUP"):
@@ -217,16 +221,66 @@ def handle_join_group(client_socket, data, username):
                 recipient_socket.send(f"{username} joined group {groupname}")
 
 
-def handle_create_group(client_socket, data):
-    _, groupname, *members = data.split()
-    if groupname in groups:
-        client_socket.send("Error: Group name already exists")
+def handle_create_group(client_socket, data_header, data_main, signature):
+    admin_username = data_header.split("||")[1]
+    admin_user = server_repository.find_user_by_username(admin_username)
+    public_key = serialization.load_pem_public_key(
+    admin_user.public_key,
+    backend=default_backend()
+    )
+    try:
+        decrypted_data = decrypt_data(admin_user.master_key,data_header,data_main,signature,public_key)
+    except ValueError as e:
+        print(e)
+        return
+    
+    group_name = decrypted_data.split("||")[1]
+    is_group = server_repository.is_group(group_name)
+    error = None
+    if(is_group == True):
+        error = "There is a group with this name"
     else:
-        groups[groupname] = set(members)
-        for member in members:
-            if member in clients:
-                recipient_socket = clients[member]
-                recipient_socket.send(f"Group {groupname} created")
+        server_repository.create_group(group_name,admin_username)
+    encrypted_message = None
+    if(error):
+        encrypted_message = encrypt_with_master_key(admin_user.master_key.decode(), "error||" + error, "ACK",server_private_key)
+    else:
+        encrypted_message = encrypt_with_master_key(admin_user.master_key.decode(), "group_ok", "ACK",server_private_key)
+    client_socket.send(encrypted_message)
+
+def handle_add_member(client_socket, data_header, data_main, signature):
+    admin_username = data_header.split("||")[1]
+    admin_user = server_repository.find_user_by_username(admin_username)
+    public_key = serialization.load_pem_public_key(
+    admin_user.public_key,
+    backend=default_backend()
+    )
+    try:
+        decrypted_data = decrypt_data(admin_user.master_key,data_header,data_main,signature,public_key)
+    except ValueError as e:
+        print(e)
+        return
+    
+    group_name = decrypted_data.split("||")[1]
+    member_username = decrypted_data.split("||")[2]
+    is_group = server_repository.is_group(group_name)
+    error = None
+    if(is_group == False):
+        error = "There is not a group with this name"
+    else:
+        real_admin_username = server_repository.get_admin_username(group_name)
+        if(admin_username!=real_admin_username):
+            error = "You are not admin of this group"
+        else:
+            member_user = server_repository.find_user_by_username(member_username)
+            if(member_user == None):
+                error = "there is not a user with this username"
+    encrypted_message = None
+    if(error):
+        encrypted_message = encrypt_with_master_key(admin_user.master_key.decode(), "error||" + error, "ACK",server_private_key)
+    else:
+        encrypted_message = encrypt_with_master_key(admin_user.master_key.decode(), "add_member_ok", "ACK",server_private_key)
+    client_socket.send(encrypted_message) 
 
 
 def handle_private(client_socket, data):
